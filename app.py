@@ -1,11 +1,34 @@
+# ============================================================
+# SISTEMA DE LOCKER
+# RASPBERRY PI 3
+#
+# Flask + SQLite + GPIO + fprintd/D-Bus
+#
+# DigitalPersona U.are.U 4000/4000B/4500
+# ============================================================
+
 import os
 import sqlite3
 import threading
 import time
-import atexit
 from datetime import datetime
 
 from flask import Flask, jsonify, render_template, request
+
+
+# ============================================================
+# CONFIGURACIÓN
+# ============================================================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DATABASE = os.path.join(
+    BASE_DIR,
+    "locker.db"
+)
+
+HOST = "0.0.0.0"
+PORT = 5000
 
 
 # ============================================================
@@ -14,12 +37,20 @@ from flask import Flask, jsonify, render_template, request
 
 try:
     import RPi.GPIO as GPIO
+
     GPIO_AVAILABLE = True
+
 except ImportError:
+
     GPIO_AVAILABLE = False
-    GPIO = None
-    print("ADVERTENCIA: RPi.GPIO no disponible.")
-    print("Modo simulación de GPIO.")
+
+    print(
+        "ADVERTENCIA: RPi.GPIO no está disponible."
+    )
+
+    print(
+        "El sistema funcionará en modo simulación."
+    )
 
 
 # ============================================================
@@ -27,57 +58,156 @@ except ImportError:
 # ============================================================
 
 try:
+
     import gi
 
-    gi.require_version("Gio", "2.0")
-    gi.require_version("GLib", "2.0")
+    gi.require_version(
+        "Gio",
+        "2.0"
+    )
+
+    gi.require_version(
+        "GLib",
+        "2.0"
+    )
 
     from gi.repository import Gio, GLib
 
     GI_AVAILABLE = True
 
-except Exception as e:
+except Exception as error:
+
     GI_AVAILABLE = False
-    Gio = None
-    GLib = None
 
-    print("ERROR cargando GI/PyGObject:")
-    print(e)
-
-
-# ============================================================
-# CONFIGURACIÓN
-# ============================================================
-
-BASE_DIR = os.path.dirname(
-    os.path.abspath(__file__)
-)
-
-DATABASE = os.path.join(
-    BASE_DIR,
-    "locker.db"
-)
+    print(
+        "ERROR cargando GI/PyGObject:",
+        error
+    )
 
 
 # ============================================================
-# GPIO BCM
+# PINES
 # ============================================================
+
+# ------------------------------------------------------------
+# RELÉ
+# ------------------------------------------------------------
 
 RELAY_PIN = 17
 
+# Cambiar a False si tu módulo de relé funciona
+# con lógica activa en LOW.
+RELAY_ACTIVE_HIGH = True
+
+RELAY_OPEN_SECONDS = 3
+
+
+# ------------------------------------------------------------
+# LEDs
+# ------------------------------------------------------------
+
 LED_PINS = {
+
     1: 18,
+
     2: 23,
+
     3: 24,
+
     4: 25
+
 }
 
+
+# ------------------------------------------------------------
+# BOTONES
+# ------------------------------------------------------------
+
 BUTTON_PINS = {
+
     1: 5,
+
     2: 6,
+
     3: 13,
+
     4: 19
+
 }
+
+
+# ============================================================
+# HUELLAS
+# ============================================================
+
+# Usuario Linux que tiene registrada la huella
+# del profesor/preceptor.
+#
+# En tu Raspberry ya tenés el usuario "alumno".
+PROFESOR_USUARIO = "alumno"
+
+
+# Usuarios Linux de los alumnos.
+#
+# Ya los registraste:
+#
+# locker_alumno_1
+# locker_alumno_2
+# locker_alumno_3
+# locker_alumno_4
+
+HUELLA_ALUMNOS = {
+
+    1: "locker_alumno_1",
+
+    2: "locker_alumno_2",
+
+    3: "locker_alumno_3",
+
+    4: "locker_alumno_4"
+
+}
+
+
+# ============================================================
+# ALUMNOS INICIALES
+# ============================================================
+
+ALUMNOS_INICIALES = [
+
+    {
+        "numero_lista": 1,
+        "nombre": "Alumno",
+        "apellido": "1",
+        "usuario_huella": "locker_alumno_1",
+        "compartimento": 1
+    },
+
+    {
+        "numero_lista": 2,
+        "nombre": "Alumno",
+        "apellido": "2",
+        "usuario_huella": "locker_alumno_2",
+        "compartimento": 2
+    },
+
+    {
+        "numero_lista": 3,
+        "nombre": "Alumno",
+        "apellido": "3",
+        "usuario_huella": "locker_alumno_3",
+        "compartimento": 3
+    },
+
+    {
+        "numero_lista": 4,
+        "nombre": "Alumno",
+        "apellido": "4",
+        "usuario_huella": "locker_alumno_4",
+        "compartimento": 4
+    }
+
+]
 
 
 # ============================================================
@@ -85,24 +215,39 @@ BUTTON_PINS = {
 # ============================================================
 
 app = Flask(
+
     __name__,
+
     template_folder="templates",
+
     static_folder="static"
+
 )
 
 
 # ============================================================
-# ESTADO GLOBAL
+# VARIABLES GLOBALES
 # ============================================================
 
 locker_abierto = False
 
+sistema_finalizado = False
+
+
 fingerprint_status = {
+
     "estado": "inactivo",
-    "mensaje": "Lector esperando.",
+
+    "mensaje": "Lector esperando",
+
     "resultado": None,
-    "alumno_id": None
+
+    "usuario": None
+
 }
+
+
+# Solo una lectura de huella simultánea.
 
 fingerprint_lock = threading.Lock()
 
@@ -114,8 +259,11 @@ fingerprint_lock = threading.Lock()
 def conectar_db():
 
     conexion = sqlite3.connect(
+
         DATABASE,
+
         timeout=10
+
     )
 
     conexion.row_factory = sqlite3.Row
@@ -123,77 +271,323 @@ def conectar_db():
     return conexion
 
 
+# ============================================================
+# HORA ACTUAL
+# ============================================================
+
+def ahora():
+
+    return datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+
+# ============================================================
+# INICIALIZAR BASE DE DATOS
+# ============================================================
+
 def inicializar_db():
 
     conexion = conectar_db()
 
     cursor = conexion.cursor()
 
-    cursor.execute("""
+    # --------------------------------------------------------
+    # TABLA ALUMNOS
+    # --------------------------------------------------------
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS alumnos (
+
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+
             numero_lista INTEGER UNIQUE,
+
             nombre TEXT NOT NULL,
+
             apellido TEXT NOT NULL,
+
             usuario_huella TEXT,
+
             compartimento INTEGER,
+
             presente INTEGER DEFAULT 0,
+
             llego_tarde INTEGER DEFAULT 0,
+
             se_retiro INTEGER DEFAULT 0,
+
             hora_llegada TEXT,
+
             hora_retiro TEXT,
+
             trajo_celular INTEGER DEFAULT 0
-        )
-    """)
 
-    cursor.execute("""
+        )
+        """
+    )
+
+    # --------------------------------------------------------
+    # TABLA PROFESORES
+    # --------------------------------------------------------
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS profesores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT NOT NULL,
-            usuario_huella TEXT UNIQUE
-        )
-    """)
 
-    cursor.execute("""
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            nombre TEXT NOT NULL,
+
+            usuario_huella TEXT UNIQUE
+
+        )
+        """
+    )
+
+    # --------------------------------------------------------
+    # TABLA PRECEPTORES
+    # --------------------------------------------------------
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS preceptores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT NOT NULL,
-            usuario_huella TEXT UNIQUE
-        )
-    """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS eventos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            alumno_id INTEGER,
-            tipo TEXT,
-            fecha_hora TEXT,
-            descripcion TEXT
+
+            nombre TEXT NOT NULL,
+
+            usuario_huella TEXT UNIQUE
+
         )
-    """)
+        """
+    )
+
+    # --------------------------------------------------------
+    # TABLA EVENTOS
+    # --------------------------------------------------------
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS eventos (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            alumno_id INTEGER,
+
+            tipo TEXT,
+
+            fecha_hora TEXT,
+
+            descripcion TEXT
+
+        )
+        """
+    )
+
+    # --------------------------------------------------------
+    # MIGRACIÓN
+    # --------------------------------------------------------
+
+    cursor.execute(
+        "PRAGMA table_info(alumnos)"
+    )
+
+    columnas_existentes = {
+
+        fila["name"]
+
+        for fila in cursor.fetchall()
+
+    }
+
+    columnas_necesarias = [
+
+        ("apellido", "TEXT"),
+
+        ("usuario_huella", "TEXT"),
+
+        ("compartimento", "INTEGER"),
+
+        ("presente", "INTEGER DEFAULT 0"),
+
+        ("llego_tarde", "INTEGER DEFAULT 0"),
+
+        ("se_retiro", "INTEGER DEFAULT 0"),
+
+        ("hora_llegada", "TEXT"),
+
+        ("hora_retiro", "TEXT"),
+
+        ("trajo_celular", "INTEGER DEFAULT 0")
+
+    ]
+
+    for nombre_columna, tipo in columnas_necesarias:
+
+        if nombre_columna not in columnas_existentes:
+
+            print(
+                "Agregando columna:",
+                nombre_columna
+            )
+
+            cursor.execute(
+                f"""
+                ALTER TABLE alumnos
+                ADD COLUMN {nombre_columna} {tipo}
+                """
+            )
+
+    # --------------------------------------------------------
+    # CREAR ALUMNOS SI NO EXISTEN
+    # --------------------------------------------------------
+
+    cantidad = cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM alumnos
+        """
+    ).fetchone()[0]
+
+    if cantidad == 0:
+
+        print(
+            "No había alumnos. Creando alumnos iniciales."
+        )
+
+        for alumno in ALUMNOS_INICIALES:
+
+            cursor.execute(
+                """
+                INSERT INTO alumnos (
+                    numero_lista,
+                    nombre,
+                    apellido,
+                    usuario_huella,
+                    compartimento
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    alumno["numero_lista"],
+                    alumno["nombre"],
+                    alumno["apellido"],
+                    alumno["usuario_huella"],
+                    alumno["compartimento"]
+                )
+            )
+
+    else:
+
+        # ----------------------------------------------------
+        # Completar datos de alumnos existentes
+        # ----------------------------------------------------
+
+        for alumno in ALUMNOS_INICIALES:
+
+            existente = cursor.execute(
+                """
+                SELECT id
+                FROM alumnos
+                WHERE numero_lista = ?
+                """,
+                (
+                    alumno["numero_lista"],
+                )
+            ).fetchone()
+
+            if existente:
+
+                cursor.execute(
+                    """
+                    UPDATE alumnos
+                    SET
+                        usuario_huella = ?,
+                        compartimento = ?
+                    WHERE numero_lista = ?
+                    """,
+                    (
+                        alumno["usuario_huella"],
+                        alumno["compartimento"],
+                        alumno["numero_lista"]
+                    )
+                )
+
+    # --------------------------------------------------------
+    # PROFESOR
+    # --------------------------------------------------------
+
+    profesor = cursor.execute(
+        """
+        SELECT id
+        FROM profesores
+        WHERE usuario_huella = ?
+        """,
+        (
+            PROFESOR_USUARIO,
+        )
+    ).fetchone()
+
+    if profesor is None:
+
+        cursor.execute(
+            """
+            INSERT INTO profesores (
+                nombre,
+                usuario_huella
+            )
+            VALUES (?, ?)
+            """,
+            (
+                "Profesor",
+                PROFESOR_USUARIO
+            )
+        )
 
     conexion.commit()
+
     conexion.close()
 
-    print("Base de datos lista.")
+    print(
+        "Base de datos lista."
+    )
 
 
 # ============================================================
-# GPIO
+# GPIO - CONFIGURAR
 # ============================================================
 
 def configurar_gpio():
 
     if not GPIO_AVAILABLE:
+
         return
 
-    GPIO.setmode(GPIO.BCM)
+    GPIO.setmode(
+        GPIO.BCM
+    )
+
+    # --------------------------------------------------------
+    # RELÉ
+    # --------------------------------------------------------
+
+    estado_inactivo = (
+        GPIO.LOW
+        if RELAY_ACTIVE_HIGH
+        else GPIO.HIGH
+    )
 
     GPIO.setup(
         RELAY_PIN,
         GPIO.OUT,
-        initial=GPIO.LOW
+        initial=estado_inactivo
     )
+
+    # --------------------------------------------------------
+    # LEDs
+    # --------------------------------------------------------
 
     for pin in LED_PINS.values():
 
@@ -203,6 +597,10 @@ def configurar_gpio():
             initial=GPIO.LOW
         )
 
+    # --------------------------------------------------------
+    # BOTONES
+    # --------------------------------------------------------
+
     for pin in BUTTON_PINS.values():
 
         GPIO.setup(
@@ -211,44 +609,78 @@ def configurar_gpio():
             pull_up_down=GPIO.PUD_UP
         )
 
-    print("GPIO configurados.")
+    print(
+        "GPIO configurados."
+    )
 
 
 # ============================================================
-# LOCKER
+# GPIO - RELÉ
 # ============================================================
 
-def abrir_locker(segundos=3):
+def abrir_locker(segundos=None):
 
     global locker_abierto
 
+    if segundos is None:
+
+        segundos = RELAY_OPEN_SECONDS
+
     locker_abierto = True
 
-    print("Abriendo locker...")
+    print(
+        "ABRIENDO LOCKER"
+    )
 
-    if GPIO_AVAILABLE:
+    try:
 
-        GPIO.output(
-            RELAY_PIN,
-            GPIO.HIGH
+        if GPIO_AVAILABLE:
+
+            if RELAY_ACTIVE_HIGH:
+
+                GPIO.output(
+                    RELAY_PIN,
+                    GPIO.HIGH
+                )
+
+            else:
+
+                GPIO.output(
+                    RELAY_PIN,
+                    GPIO.LOW
+                )
+
+        time.sleep(
+            segundos
         )
 
-    time.sleep(segundos)
+    finally:
 
-    if GPIO_AVAILABLE:
+        if GPIO_AVAILABLE:
 
-        GPIO.output(
-            RELAY_PIN,
-            GPIO.LOW
+            if RELAY_ACTIVE_HIGH:
+
+                GPIO.output(
+                    RELAY_PIN,
+                    GPIO.LOW
+                )
+
+            else:
+
+                GPIO.output(
+                    RELAY_PIN,
+                    GPIO.HIGH
+                )
+
+        locker_abierto = False
+
+        print(
+            "LOCKER CERRADO"
         )
-
-    locker_abierto = False
-
-    print("Locker cerrado.")
 
 
 # ============================================================
-# LED
+# GPIO - LED
 # ============================================================
 
 def encender_led(
@@ -261,31 +693,40 @@ def encender_led(
     )
 
     if pin is None:
-        return
+
+        return False
 
     print(
-        "Encendiendo LED del compartimento",
-        compartimento
+        f"LED compartimento {compartimento}"
     )
 
     if not GPIO_AVAILABLE:
-        return
+
+        return True
 
     GPIO.output(
         pin,
         GPIO.HIGH
     )
 
-    time.sleep(segundos)
+    try:
 
-    GPIO.output(
-        pin,
-        GPIO.LOW
-    )
+        time.sleep(
+            segundos
+        )
+
+    finally:
+
+        GPIO.output(
+            pin,
+            GPIO.LOW
+        )
+
+    return True
 
 
 # ============================================================
-# BOTÓN
+# GPIO - BOTÓN
 # ============================================================
 
 def boton_presionado(
@@ -297,12 +738,103 @@ def boton_presionado(
     )
 
     if pin is None:
+
         return False
 
     if not GPIO_AVAILABLE:
+
         return False
 
-    return GPIO.input(pin) == GPIO.LOW
+    return (
+        GPIO.input(pin)
+        == GPIO.LOW
+    )
+
+
+# ============================================================
+# ESPERAR BOTÓN
+# ============================================================
+
+def esperar_boton(
+    compartimento,
+    timeout=120
+):
+
+    pin = BUTTON_PINS.get(
+        compartimento
+    )
+
+    if pin is None:
+
+        return False
+
+    print(
+        f"Esperando botón del compartimento "
+        f"{compartimento}"
+    )
+
+    # --------------------------------------------------------
+    # SIMULACIÓN
+    # --------------------------------------------------------
+
+    if not GPIO_AVAILABLE:
+
+        print(
+            "GPIO no disponible: "
+            "simulación de botón."
+        )
+
+        time.sleep(1)
+
+        return True
+
+    inicio = time.time()
+
+    # --------------------------------------------------------
+    # Esperar a que esté suelto primero
+    # --------------------------------------------------------
+
+    while GPIO.input(pin) == GPIO.LOW:
+
+        if time.time() - inicio > timeout:
+
+            return False
+
+        time.sleep(0.05)
+
+    # --------------------------------------------------------
+    # Esperar pulsación
+    # --------------------------------------------------------
+
+    while time.time() - inicio < timeout:
+
+        if GPIO.input(pin) == GPIO.LOW:
+
+            # Antirrebote
+
+            time.sleep(0.05)
+
+            if GPIO.input(pin) == GPIO.LOW:
+
+                print(
+                    "Botón presionado."
+                )
+
+                # Esperar liberación
+
+                while GPIO.input(pin) == GPIO.LOW:
+
+                    time.sleep(0.03)
+
+                return True
+
+        time.sleep(0.05)
+
+    print(
+        "Tiempo agotado esperando botón."
+    )
+
+    return False
 
 
 # ============================================================
@@ -311,7 +843,9 @@ def boton_presionado(
 
 class FingerprintManager:
 
-    BUS_NAME = "net.reactivated.Fprint"
+    BUS_NAME = (
+        "net.reactivated.Fprint"
+    )
 
     MANAGER_PATH = (
         "/net/reactivated/Fprint/Manager"
@@ -328,7 +862,9 @@ class FingerprintManager:
     def __init__(self):
 
         self.bus = None
+
         self.device = None
+
         self.device_path = None
 
     # --------------------------------------------------------
@@ -354,29 +890,25 @@ class FingerprintManager:
                 None
             )
 
-            print(
-                "Conectado al D-Bus del sistema."
-            )
-
             return True
 
-        except Exception as e:
+        except Exception as error:
 
             print(
-                "Error conectando a D-Bus:",
-                e
+                "Error conectando D-Bus:",
+                error
             )
 
             fingerprint_status["estado"] = "error"
 
             fingerprint_status["mensaje"] = (
-                str(e)
+                str(error)
             )
 
             return False
 
     # --------------------------------------------------------
-    # OBTENER LECTOR
+    # OBTENER DISPOSITIVO
     # --------------------------------------------------------
 
     def obtener_dispositivo(self):
@@ -384,26 +916,41 @@ class FingerprintManager:
         if not self.bus:
 
             if not self.conectar():
+
                 return False
 
         try:
 
             manager = Gio.DBusProxy.new_sync(
+
                 self.bus,
+
                 Gio.DBusProxyFlags.NONE,
+
                 None,
+
                 self.BUS_NAME,
+
                 self.MANAGER_PATH,
+
                 self.MANAGER_INTERFACE,
+
                 None
+
             )
 
             resultado = manager.call_sync(
+
                 "GetDefaultDevice",
+
                 None,
+
                 Gio.DBusCallFlags.NONE,
+
                 -1,
+
                 None
+
             )
 
             self.device_path = (
@@ -411,45 +958,57 @@ class FingerprintManager:
             )
 
             print(
-                "Lector encontrado:",
+                "Dispositivo de huella:",
                 self.device_path
             )
 
             self.device = Gio.DBusProxy.new_sync(
+
                 self.bus,
+
                 Gio.DBusProxyFlags.NONE,
+
                 None,
+
                 self.BUS_NAME,
+
                 self.device_path,
+
                 self.DEVICE_INTERFACE,
+
                 None
+
             )
 
             return True
 
-        except Exception as e:
+        except Exception as error:
 
             print(
-                "No se pudo obtener el lector:"
+                "Error obteniendo lector:",
+                error
             )
 
-            print(e)
+            self.device = None
 
             fingerprint_status["estado"] = "error"
 
             fingerprint_status["mensaje"] = (
-                "No se pudo acceder al lector."
+                "No se pudo acceder al lector: "
+                + str(error)
             )
 
             return False
 
     # --------------------------------------------------------
-    # VERIFICAR HUELLA
+    # VERIFICAR UN USUARIO
     # --------------------------------------------------------
 
-    def verificar(self):
-
-        global fingerprint_status
+    def verificar_usuario(
+        self,
+        usuario,
+        mensaje=None
+    ):
 
         with fingerprint_lock:
 
@@ -458,33 +1017,52 @@ class FingerprintManager:
                 return {
                     "ok": False,
                     "resultado": "lector_no_disponible",
-                    "mensaje": (
-                        "No se pudo acceder al lector."
-                    )
+                    "usuario": usuario
                 }
 
-            resultado_final = {
-                "ok": False,
-                "resultado": None,
-                "mensaje": ""
-            }
+            if mensaje is None:
 
-            fingerprint_status = {
-                "estado": "esperando",
-                "mensaje": (
+                mensaje = (
                     "Coloque el dedo en el lector."
-                ),
+                )
+
+            fingerprint_status["estado"] = (
+                "esperando"
+            )
+
+            fingerprint_status["mensaje"] = (
+                mensaje
+            )
+
+            fingerprint_status["resultado"] = (
+                None
+            )
+
+            fingerprint_status["usuario"] = (
+                usuario
+            )
+
+            resultado_final = {
+
+                "ok": False,
+
                 "resultado": None,
-                "alumno_id": None
+
+                "usuario": usuario
+
             }
 
             loop = GLib.MainLoop()
 
+            terminado = {
+                "valor": False
+            }
+
             # ------------------------------------------------
-            # SEÑALES D-BUS
+            # SEÑALES
             # ------------------------------------------------
 
-            def recibir_senal(
+            def signal_handler(
                 proxy,
                 sender_name,
                 signal_name,
@@ -493,194 +1071,269 @@ class FingerprintManager:
 
                 try:
 
-                    if signal_name == "VerifyStatus":
+                    valores = parameters.unpack()
 
-                        resultado, terminado = (
-                            parameters.unpack()
-                        )
+                except Exception:
 
-                        print(
-                            "VerifyStatus:",
-                            resultado,
-                            terminado
-                        )
+                    return
+
+                # --------------------------------------------
+                # VerifyStatus
+                # --------------------------------------------
+
+                if signal_name == "VerifyStatus":
+
+                    if len(valores) < 2:
+
+                        return
+
+                    estado = valores[0]
+
+                    done = valores[1]
+
+                    print(
+                        "VerifyStatus:",
+                        estado,
+                        done
+                    )
+
+                    fingerprint_status[
+                        "mensaje"
+                    ] = estado
+
+                    # ----------------------------------------
+                    # MATCH
+                    # ----------------------------------------
+
+                    if estado == "verify-match":
+
+                        resultado_final[
+                            "ok"
+                        ] = True
+
+                        resultado_final[
+                            "resultado"
+                        ] = "verify-match"
+
+                        fingerprint_status[
+                            "estado"
+                        ] = "reconocida"
 
                         fingerprint_status[
                             "resultado"
-                        ] = resultado
+                        ] = "verify-match"
 
-                        if resultado == "verify-match":
+                        terminado[
+                            "valor"
+                        ] = True
 
-                            resultado_final["ok"] = True
-
-                            resultado_final[
-                                "resultado"
-                            ] = "verify-match"
-
-                            resultado_final[
-                                "mensaje"
-                            ] = (
-                                "Huella reconocida."
-                            )
-
-                            fingerprint_status[
-                                "estado"
-                            ] = "reconocida"
-
-                            fingerprint_status[
-                                "mensaje"
-                            ] = (
-                                "Huella reconocida."
-                            )
+                        try:
 
                             loop.quit()
 
-                        elif terminado:
+                        except Exception:
 
-                            resultado_final["ok"] = False
+                            pass
+
+                    # ----------------------------------------
+                    # NO MATCH
+                    # ----------------------------------------
+
+                    elif estado in (
+
+                        "verify-no-match",
+
+                        "verify-retry-scan",
+
+                        "verify-finger-not-centered",
+
+                        "verify-remove-and-retry",
+
+                        "verify-disconnected",
+
+                        "verify-unknown-error"
+
+                    ):
+
+                        if done:
+
+                            resultado_final[
+                                "ok"
+                            ] = False
 
                             resultado_final[
                                 "resultado"
-                            ] = resultado
-
-                            resultado_final[
-                                "mensaje"
-                            ] = (
-                                "La huella no coincide."
-                            )
+                            ] = estado
 
                             fingerprint_status[
                                 "estado"
                             ] = "finalizado"
 
-                            fingerprint_status[
-                                "mensaje"
-                            ] = (
-                                "Huella no reconocida."
-                            )
+                            terminado[
+                                "valor"
+                            ] = True
 
-                            loop.quit()
+                            try:
 
-                        else:
+                                loop.quit()
 
-                            fingerprint_status[
-                                "mensaje"
-                            ] = self.traducir_estado(
-                                resultado
-                            )
+                            except Exception:
 
-                    elif signal_name == (
-                        "VerifyFingerMatched"
-                    ):
+                                pass
 
-                        finger = (
-                            parameters.unpack()[0]
-                        )
+                # --------------------------------------------
+                # VerifyFingerSelected
+                # --------------------------------------------
+
+                elif (
+                    signal_name
+                    == "VerifyFingerSelected"
+                ):
+
+                    try:
+
+                        dedo = valores[0]
 
                         print(
-                            "Huella encontrada:",
-                            finger
+                            "Dedo seleccionado:",
+                            dedo
                         )
 
-                        fingerprint_status[
-                            "resultado"
-                        ] = finger
+                    except Exception:
 
-                except Exception as e:
-
-                    print(
-                        "Error procesando señal:",
-                        e
-                    )
-
-                    resultado_final["ok"] = False
-
-                    resultado_final[
-                        "resultado"
-                    ] = "error"
-
-                    resultado_final[
-                        "mensaje"
-                    ] = str(e)
-
-                    fingerprint_status[
-                        "estado"
-                    ] = "error"
-
-                    fingerprint_status[
-                        "mensaje"
-                    ] = str(e)
-
-                    loop.quit()
+                        pass
 
             # ------------------------------------------------
-            # CONECTAR SEÑALES
+            # CONECTAR SEÑAL
             # ------------------------------------------------
 
-            self.device.connect(
-                "g-signal",
-                recibir_senal
-            )
+            signal_id = None
 
             try:
 
-                print(
-                    "Reclamando lector..."
+                signal_id = self.device.connect(
+                    "g-signal",
+                    signal_handler
                 )
 
-                # Usuario vacío = usuario actual.
-                # Es el modo recomendado por fprintd
-                # para usuarios normales.
+                # --------------------------------------------
+                # CLAIM DEL USUARIO
+                # --------------------------------------------
+
+                print(
+                    "Reclamando lector para:",
+                    usuario
+                )
 
                 self.device.call_sync(
+
                     "Claim",
+
                     GLib.Variant(
                         "(s)",
-                        ("",)
+                        (usuario,)
                     ),
+
                     Gio.DBusCallFlags.NONE,
+
                     -1,
+
                     None
+
                 )
 
                 print(
                     "Lector reclamado."
                 )
 
+                # --------------------------------------------
+                # VERIFICAR
+                # --------------------------------------------
+
                 self.device.call_sync(
+
                     "VerifyStart",
+
                     GLib.Variant(
                         "(s)",
                         ("any",)
                     ),
+
                     Gio.DBusCallFlags.NONE,
+
                     -1,
+
                     None
+
                 )
 
                 print(
                     "Esperando huella..."
                 )
 
-                loop.run()
+                # --------------------------------------------
+                # TIMEOUT
+                # --------------------------------------------
 
-            except Exception as e:
+                def timeout():
 
-                print(
-                    "Error durante la verificación:"
+                    if not terminado["valor"]:
+
+                        print(
+                            "Tiempo agotado "
+                            "esperando huella."
+                        )
+
+                        resultado_final[
+                            "resultado"
+                        ] = "timeout"
+
+                        fingerprint_status[
+                            "estado"
+                        ] = "timeout"
+
+                        fingerprint_status[
+                            "mensaje"
+                        ] = (
+                            "Tiempo agotado."
+                        )
+
+                        terminado[
+                            "valor"
+                        ] = True
+
+                        try:
+
+                            loop.quit()
+
+                        except Exception:
+
+                            pass
+
+                    return False
+
+                GLib.timeout_add(
+                    30000,
+                    timeout
                 )
 
-                print(e)
+                loop.run()
 
-                resultado_final["ok"] = False
+            except Exception as error:
+
+                print(
+                    "Error durante "
+                    "verificación:",
+                    error
+                )
+
+                resultado_final[
+                    "ok"
+                ] = False
 
                 resultado_final[
                     "resultado"
-                ] = "error"
-
-                resultado_final[
-                    "mensaje"
-                ] = str(e)
+                ] = str(error)
 
                 fingerprint_status[
                     "estado"
@@ -688,83 +1341,164 @@ class FingerprintManager:
 
                 fingerprint_status[
                     "mensaje"
-                ] = str(e)
+                ] = str(error)
 
             finally:
 
+                # --------------------------------------------
+                # DETENER VERIFY
+                # --------------------------------------------
+
                 try:
 
                     self.device.call_sync(
+
                         "VerifyStop",
+
                         None,
+
                         Gio.DBusCallFlags.NONE,
+
                         -1,
+
                         None
+
                     )
 
                 except Exception:
+
                     pass
+
+                # --------------------------------------------
+                # LIBERAR
+                # --------------------------------------------
 
                 try:
 
                     self.device.call_sync(
+
                         "Release",
+
                         None,
+
                         Gio.DBusCallFlags.NONE,
+
                         -1,
+
                         None
+
                     )
 
                 except Exception:
+
                     pass
 
-                fingerprint_status[
-                    "estado"
-                ] = (
-                    "inactivo"
-                    if resultado_final["ok"]
-                    else fingerprint_status["estado"]
-                )
+                # --------------------------------------------
+                # DESCONECTAR SEÑAL
+                # --------------------------------------------
+
+                if signal_id is not None:
+
+                    try:
+
+                        self.device.disconnect(
+                            signal_id
+                        )
+
+                    except Exception:
+
+                        pass
 
             return resultado_final
 
     # --------------------------------------------------------
-    # TRADUCIR ESTADOS
+    # IDENTIFICAR ALUMNO
     # --------------------------------------------------------
 
-    @staticmethod
-    def traducir_estado(
-        estado
-    ):
+    def identificar_alumno(self):
 
-        mensajes = {
+        alumnos = obtener_alumnos()
 
-            "verify-retry-scan":
-                "No se pudo leer. Intente nuevamente.",
+        if not alumnos:
 
-            "verify-finger-not-centered":
-                "Coloque el dedo correctamente.",
+            return {
+                "ok": False,
+                "resultado": "sin_alumnos"
+            }
 
-            "verify-remove-and-retry":
-                "Retire el dedo y vuelva a colocarlo.",
+        # ----------------------------------------------------
+        # IMPORTANTE
+        #
+        # fprintd verifica contra un usuario específico.
+        #
+        # Por eso probamos cada usuario registrado.
+        # ----------------------------------------------------
 
-            "verify-too-fast":
-                "Coloque el dedo nuevamente.",
+        for alumno in alumnos:
 
-            "verify-no-match":
-                "La huella no coincide.",
+            usuario = alumno[
+                "usuario_huella"
+            ]
 
-            "verify-disconnected":
-                "El lector fue desconectado.",
+            if not usuario:
 
-            "verify-unknown-error":
-                "Error del lector."
+                continue
+
+            resultado = self.verificar_usuario(
+
+                usuario,
+
+                "Coloque la huella del alumno."
+
+            )
+
+            if resultado["ok"]:
+
+                alumno_dict = dict(
+                    alumno
+                )
+
+                alumno_dict[
+                    "alumno_id"
+                ] = alumno_dict["id"]
+
+                alumno_dict[
+                    "resultado"
+                ] = "verify-match"
+
+                return {
+                    "ok": True,
+                    "alumno": alumno_dict
+                }
+
+            # ------------------------------------------------
+            # Si hubo un error real, no continuar
+            # ------------------------------------------------
+
+            if resultado["resultado"] in (
+
+                "lector_no_disponible",
+
+                "timeout"
+
+            ):
+
+                return {
+                    "ok": False,
+                    "resultado":
+                        resultado["resultado"],
+                    "mensaje":
+                        fingerprint_status[
+                            "mensaje"
+                        ]
+                }
+
+        return {
+            "ok": False,
+            "resultado": "no-match",
+            "mensaje":
+                "La huella no corresponde a ningún alumno."
         }
-
-        return mensajes.get(
-            estado,
-            estado
-        )
 
 
 # ============================================================
@@ -777,27 +1511,49 @@ fingerprint_manager = (
 
 
 # ============================================================
-# FUNCIONES AUXILIARES
+# FUNCIONES DE ALUMNOS
 # ============================================================
 
-def obtener_alumno(
-    alumno_id
-):
+def obtener_alumnos():
 
     conexion = conectar_db()
 
-    alumno = conexion.execute("""
+    filas = conexion.execute(
+        """
+        SELECT *
+        FROM alumnos
+        ORDER BY numero_lista
+        """
+    ).fetchall()
+
+    conexion.close()
+
+    return filas
+
+
+def obtener_alumno(alumno_id):
+
+    conexion = conectar_db()
+
+    alumno = conexion.execute(
+        """
         SELECT *
         FROM alumnos
         WHERE id = ?
-    """, (
-        alumno_id,
-    )).fetchone()
+        """,
+        (
+            alumno_id,
+        )
+    ).fetchone()
 
     conexion.close()
 
     return alumno
 
+
+# ============================================================
+# REGISTRAR EVENTO
+# ============================================================
 
 def registrar_evento(
     alumno_id,
@@ -805,13 +1561,12 @@ def registrar_evento(
     descripcion
 ):
 
-    ahora = datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    fecha = ahora()
 
     conexion = conectar_db()
 
-    conexion.execute("""
+    conexion.execute(
+        """
         INSERT INTO eventos (
             alumno_id,
             tipo,
@@ -819,19 +1574,22 @@ def registrar_evento(
             descripcion
         )
         VALUES (?, ?, ?, ?)
-    """, (
-        alumno_id,
-        tipo,
-        ahora,
-        descripcion
-    ))
+        """,
+        (
+            alumno_id,
+            tipo,
+            fecha,
+            descripcion
+        )
+    )
 
     conexion.commit()
+
     conexion.close()
 
 
 # ============================================================
-# PÁGINA
+# PÁGINAS
 # ============================================================
 
 @app.route("/")
@@ -843,11 +1601,13 @@ def inicio():
 
 
 # ============================================================
-# ESTADO
+# API ESTADO
 # ============================================================
 
-@app.route("/api/estado")
-def estado():
+@app.route(
+    "/api/estado"
+)
+def api_estado():
 
     return jsonify({
 
@@ -869,335 +1629,15 @@ def estado():
 
 
 # ============================================================
-# LOGIN
+# API ALUMNOS
 # ============================================================
 
 @app.route(
-    "/api/login/esperar-huella",
-    methods=["POST"]
+    "/api/alumnos"
 )
-def login_huella():
-
-    resultado = (
-        fingerprint_manager.verificar()
-    )
-
-    if not resultado["ok"]:
-
-        return jsonify({
-            "ok": False,
-            "mensaje":
-                resultado.get(
-                    "mensaje",
-                    "Huella no reconocida."
-                )
-        })
-
-    hilo = threading.Thread(
-        target=abrir_locker,
-        args=(3,),
-        daemon=True
-    )
-
-    hilo.start()
-
-    return jsonify({
-        "ok": True,
-        "mensaje":
-            "Huella reconocida. Locker abierto."
-    })
-
-
-# ============================================================
-# ALUMNO - ESPERAR HUELLA
-# ============================================================
-
-@app.route(
-    "/api/alumno/esperar-huella",
-    methods=["POST"]
-)
-def alumno_huella():
-
-    resultado = (
-        fingerprint_manager.verificar()
-    )
-
-    if not resultado["ok"]:
-
-        return jsonify({
-            "ok": False,
-            "mensaje":
-                resultado.get(
-                    "mensaje",
-                    "Huella no reconocida."
-                )
-        })
-
-    # --------------------------------------------------------
-    # IMPORTANTE
-    #
-    # fprintd verifica contra la huella del usuario Linux.
-    # Por lo tanto, para identificar alumnos individualmente,
-    # necesitamos asociar las huellas/alumnos en una etapa
-    # posterior.
-    #
-    # Por ahora devolvemos el alumno asociado a la huella
-    # configurada en la BD.
-    # --------------------------------------------------------
-
-    conexion = conectar_db()
-
-    alumno = conexion.execute("""
-        SELECT *
-        FROM alumnos
-        WHERE usuario_huella = ?
-        LIMIT 1
-    """, (
-        os.environ.get(
-            "LOCKER_HUELLA_USUARIO",
-            os.getenv("USER", "alumno")
-        ),
-    )).fetchone()
-
-    conexion.close()
-
-    if alumno:
-
-        return jsonify({
-
-            "ok": True,
-
-            "alumno_id":
-                alumno["id"],
-
-            "numero_lista":
-                alumno["numero_lista"],
-
-            "nombre":
-                alumno["nombre"],
-
-            "apellido":
-                alumno["apellido"],
-
-            "compartimento":
-                alumno["compartimento"]
-
-        })
-
-    return jsonify({
-
-        "ok": True,
-
-        "alumno_id": None,
-
-        "mensaje":
-            "Huella reconocida, pero no está asociada a un alumno."
-
-    })
-
-
-# ============================================================
-# LOCKER
-# ============================================================
-
-@app.route(
-    "/api/locker/abrir",
-    methods=["POST"]
-)
-def api_abrir_locker():
-
-    if locker_abierto:
-
-        return jsonify({
-            "ok": False,
-            "mensaje":
-                "El locker ya está abierto."
-        })
-
-    hilo = threading.Thread(
-        target=abrir_locker,
-        args=(3,),
-        daemon=True
-    )
-
-    hilo.start()
-
-    return jsonify({
-        "ok": True,
-        "mensaje":
-            "Locker abierto."
-    })
-
-
-# ============================================================
-# LED
-# ============================================================
-
-@app.route(
-    "/api/led/<int:compartimento>",
-    methods=["POST"]
-)
-def api_led(compartimento):
-
-    if compartimento not in LED_PINS:
-
-        return jsonify({
-            "ok": False,
-            "mensaje":
-                "Compartimento inválido."
-        }), 400
-
-    hilo = threading.Thread(
-        target=encender_led,
-        args=(compartimento, 2),
-        daemon=True
-    )
-
-    hilo.start()
-
-    return jsonify({
-        "ok": True,
-        "compartimento":
-            compartimento
-    })
-
-
-# ============================================================
-# BOTÓN
-# ============================================================
-
-@app.route(
-    "/api/boton/<int:compartimento>"
-)
-def api_boton(compartimento):
-
-    if compartimento not in BUTTON_PINS:
-
-        return jsonify({
-            "ok": False
-        }), 400
-
-    return jsonify({
-
-        "ok": True,
-
-        "presionado":
-            boton_presionado(
-                compartimento
-            )
-    })
-
-
-# ============================================================
-# ESPERAR BOTÓN CELULAR
-# ============================================================
-
-@app.route(
-    "/api/celular/esperar-boton",
-    methods=["POST"]
-)
-def esperar_boton_celular():
-
-    datos = (
-        request.get_json(
-            silent=True
-        ) or {}
-    )
-
-    compartimento = datos.get(
-        "compartimento"
-    )
-
-    alumno_id = datos.get(
-        "alumno_id"
-    )
-
-    if compartimento not in BUTTON_PINS:
-
-        return jsonify({
-            "ok": False,
-            "mensaje":
-                "Compartimento inválido."
-        })
-
-    if not alumno_id:
-
-        return jsonify({
-            "ok": False,
-            "mensaje":
-                "Alumno inválido."
-        })
-
-    print(
-        "Esperando botón del compartimento",
-        compartimento
-    )
-
-    inicio = time.time()
-
-    timeout = 60
-
-    while time.time() - inicio < timeout:
-
-        if boton_presionado(
-            compartimento
-        ):
-
-            # Evitar rebote
-            time.sleep(0.3)
-
-            hilo = threading.Thread(
-                target=encender_led,
-                args=(compartimento, 2),
-                daemon=True
-            )
-
-            hilo.start()
-
-            conexion = conectar_db()
-
-            conexion.execute("""
-                UPDATE alumnos
-                SET trajo_celular = 1
-                WHERE id = ?
-            """, (
-                alumno_id,
-            ))
-
-            conexion.commit()
-            conexion.close()
-
-            return jsonify({
-                "ok": True,
-                "mensaje":
-                    "Celular registrado correctamente."
-            })
-
-        time.sleep(0.1)
-
-    return jsonify({
-        "ok": False,
-        "mensaje":
-            "Tiempo de espera agotado."
-    })
-
-
-# ============================================================
-# ALUMNOS
-# ============================================================
-
-@app.route("/api/alumnos")
 def api_alumnos():
 
-    conexion = conectar_db()
-
-    alumnos = conexion.execute("""
-        SELECT *
-        FROM alumnos
-        ORDER BY numero_lista
-    """).fetchall()
-
-    conexion.close()
+    alumnos = obtener_alumnos()
 
     return jsonify({
 
@@ -1212,7 +1652,414 @@ def api_alumnos():
 
 
 # ============================================================
-# ASISTENCIA
+# API LOGIN
+# ============================================================
+
+@app.route(
+    "/api/login/esperar-huella",
+    methods=["POST"]
+)
+def api_login():
+
+    resultado = (
+        fingerprint_manager.verificar_usuario(
+
+            PROFESOR_USUARIO,
+
+            "Coloque la huella del profesor."
+        )
+    )
+
+    if resultado["ok"]:
+
+        return jsonify({
+
+            "ok": True,
+
+            "mensaje":
+                "Huella del profesor reconocida.",
+
+            "usuario":
+                PROFESOR_USUARIO
+
+        })
+
+    return jsonify({
+
+        "ok": False,
+
+        "mensaje":
+            "La huella no corresponde "
+            "al profesor/preceptor.",
+
+        "resultado":
+            resultado["resultado"]
+
+    })
+
+
+# ============================================================
+# API HUELLA - IDENTIFICAR ALUMNO
+# ============================================================
+
+@app.route(
+    "/api/alumno/esperar-huella",
+    methods=["POST"]
+)
+def api_alumno_huella():
+
+    resultado = (
+        fingerprint_manager.identificar_alumno()
+    )
+
+    if not resultado["ok"]:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                resultado.get(
+                    "mensaje",
+                    "No se pudo identificar al alumno."
+                ),
+
+            "resultado":
+                resultado.get(
+                    "resultado"
+                )
+
+        })
+
+    alumno = resultado["alumno"]
+
+    return jsonify({
+
+        "ok": True,
+
+        "alumno_id":
+            alumno["id"],
+
+        "numero_lista":
+            alumno["numero_lista"],
+
+        "nombre":
+            alumno["nombre"],
+
+        "apellido":
+            alumno["apellido"],
+
+        "compartimento":
+            alumno["compartimento"],
+
+        "usuario_huella":
+            alumno["usuario_huella"]
+
+    })
+
+
+# ============================================================
+# API HUELLA - VERIFICAR ALUMNO ESPECÍFICO
+# ============================================================
+
+@app.route(
+    "/api/alumno/<int:alumno_id>/verificar-huella",
+    methods=["POST"]
+)
+def api_verificar_alumno(
+    alumno_id
+):
+
+    alumno = obtener_alumno(
+        alumno_id
+    )
+
+    if alumno is None:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "Alumno inexistente."
+
+        }), 404
+
+    usuario = alumno[
+        "usuario_huella"
+    ]
+
+    if not usuario:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "El alumno no tiene huella registrada."
+
+        })
+
+    resultado = (
+        fingerprint_manager.verificar_usuario(
+
+            usuario,
+
+            "Coloque la huella del alumno."
+        )
+    )
+
+    if not resultado["ok"]:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "La huella no corresponde "
+                "al alumno seleccionado.",
+
+            "resultado":
+                resultado["resultado"]
+
+        })
+
+    return jsonify({
+
+        "ok": True,
+
+        "alumno_id":
+            alumno_id
+
+    })
+
+
+# ============================================================
+# API ESTADO HUELLA
+# ============================================================
+
+@app.route(
+    "/api/huella/estado"
+)
+def api_huella_estado():
+
+    return jsonify(
+        fingerprint_status
+    )
+
+
+# ============================================================
+# API BOTÓN
+# ============================================================
+
+@app.route(
+    "/api/boton/<int:compartimento>"
+)
+def api_boton(
+    compartimento
+):
+
+    if compartimento not in BUTTON_PINS:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "Compartimento inválido."
+
+        }), 400
+
+    return jsonify({
+
+        "ok": True,
+
+        "presionado":
+            boton_presionado(
+                compartimento
+            )
+
+    })
+
+
+# ============================================================
+# API ESPERAR BOTÓN
+# ============================================================
+
+@app.route(
+    "/api/celular/esperar-boton",
+    methods=["POST"]
+)
+def api_esperar_boton():
+
+    datos = (
+        request.get_json(
+            silent=True
+        )
+        or {}
+    )
+
+    alumno_id = datos.get(
+        "alumno_id"
+    )
+
+    compartimento = datos.get(
+        "compartimento"
+    )
+
+    if not alumno_id:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "Falta alumno_id."
+
+        }), 400
+
+    try:
+
+        compartimento = int(
+            compartimento
+        )
+
+    except Exception:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "Compartimento inválido."
+
+        }), 400
+
+    alumno = obtener_alumno(
+        alumno_id
+    )
+
+    if alumno is None:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "Alumno inexistente."
+
+        }), 404
+
+    if (
+        alumno["compartimento"]
+        != compartimento
+    ):
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "El compartimento no corresponde "
+                "al alumno."
+
+        }), 400
+
+    correcto = esperar_boton(
+        compartimento
+    )
+
+    if not correcto:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "No se presionó el botón "
+                "dentro del tiempo permitido."
+
+        })
+
+    # --------------------------------------------------------
+    # Encender LED de confirmación
+    # --------------------------------------------------------
+
+    hilo_led = threading.Thread(
+
+        target=encender_led,
+
+        args=(
+            compartimento,
+            2
+        ),
+
+        daemon=True
+
+    )
+
+    hilo_led.start()
+
+    return jsonify({
+
+        "ok": True,
+
+        "mensaje":
+            "Celular registrado correctamente."
+
+    })
+
+
+# ============================================================
+# API LED
+# ============================================================
+
+@app.route(
+    "/api/led/<int:compartimento>",
+    methods=["POST"]
+)
+def api_led(
+    compartimento
+):
+
+    if compartimento not in LED_PINS:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "Compartimento inválido."
+
+        }), 400
+
+    hilo = threading.Thread(
+
+        target=encender_led,
+
+        args=(
+            compartimento,
+            2
+        ),
+
+        daemon=True
+
+    )
+
+    hilo.start()
+
+    return jsonify({
+
+        "ok": True,
+
+        "compartimento":
+            compartimento
+
+    })
+
+
+# ============================================================
+# API ASISTENCIA - PRESENTE
 # ============================================================
 
 @app.route(
@@ -1224,7 +2071,8 @@ def api_asistencia():
     datos = (
         request.get_json(
             silent=True
-        ) or {}
+        )
+        or {}
     )
 
     alumno_id = datos.get(
@@ -1243,63 +2091,86 @@ def api_asistencia():
         )
     )
 
+    if not alumno_id:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "Falta alumno_id."
+
+        }), 400
+
     alumno = obtener_alumno(
         alumno_id
     )
 
-    if not alumno:
+    if alumno is None:
 
         return jsonify({
+
             "ok": False,
+
             "mensaje":
                 "Alumno inexistente."
-        })
 
-    ahora = datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+        }), 404
+
+    fecha = ahora()
 
     conexion = conectar_db()
 
-    conexion.execute("""
+    conexion.execute(
+        """
         UPDATE alumnos
-        SET presente = 1,
+
+        SET
+            presente = 1,
             llego_tarde = 0,
             hora_llegada = ?,
-            trajo_celular = ?
-        WHERE id = ?
-    """, (
-        ahora,
-        int(trajo_celular),
-        alumno_id
-    ))
+            trajo_celular = ?,
+            se_retiro = 0
 
-    conexion.execute("""
-        INSERT INTO eventos (
-            alumno_id,
-            tipo,
-            fecha_hora,
-            descripcion
+        WHERE id = ?
+        """,
+        (
+            fecha,
+            1 if trajo_celular else 0,
+            alumno_id
         )
-        VALUES (?, ?, ?, ?)
-    """, (
-        alumno_id,
-        estado,
-        ahora,
-        "Asistencia registrada"
-    ))
+    )
 
     conexion.commit()
+
     conexion.close()
 
+    registrar_evento(
+
+        alumno_id,
+
+        "asistencia",
+
+        (
+            "Alumno presente. "
+            f"Estado: {estado}. "
+            f"Trajo celular: "
+            f"{trajo_celular}"
+        )
+
+    )
+
     return jsonify({
+
         "ok": True,
-        "hora": ahora
+
+        "hora": fecha
+
     })
 
 
 # ============================================================
-# AUSENTE
+# API ASISTENCIA - AUSENTE
 # ============================================================
 
 @app.route(
@@ -1311,64 +2182,82 @@ def api_ausente():
     datos = (
         request.get_json(
             silent=True
-        ) or {}
+        )
+        or {}
     )
 
     alumno_id = datos.get(
         "alumno_id"
     )
 
+    if not alumno_id:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "Falta alumno_id."
+
+        }), 400
+
     alumno = obtener_alumno(
         alumno_id
     )
 
-    if not alumno:
+    if alumno is None:
 
         return jsonify({
+
             "ok": False,
+
             "mensaje":
                 "Alumno inexistente."
-        })
 
-    ahora = datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+        }), 404
 
     conexion = conectar_db()
 
-    conexion.execute("""
+    conexion.execute(
+        """
         UPDATE alumnos
-        SET presente = 0
-        WHERE id = ?
-    """, (
-        alumno_id,
-    ))
 
-    conexion.execute("""
-        INSERT INTO eventos (
+        SET
+            presente = 0,
+            llego_tarde = 0,
+            hora_llegada = NULL,
+            trajo_celular = 0
+
+        WHERE id = ?
+        """,
+        (
             alumno_id,
-            tipo,
-            fecha_hora,
-            descripcion
         )
-        VALUES (?, ?, ?, ?)
-    """, (
-        alumno_id,
-        "ausente",
-        ahora,
-        "Alumno ausente"
-    ))
+    )
 
     conexion.commit()
+
     conexion.close()
 
+    registrar_evento(
+
+        alumno_id,
+
+        "ausente",
+
+        "Alumno marcado como ausente."
+
+    )
+
     return jsonify({
+
         "ok": True
+
     })
 
 
 # ============================================================
-# LLEGADA TARDE
+# API LLEGADA TARDE
 # ============================================================
 
 @app.route(
@@ -1380,7 +2269,8 @@ def api_llegada():
     datos = (
         request.get_json(
             silent=True
-        ) or {}
+        )
+        or {}
     )
 
     alumno_id = datos.get(
@@ -1394,63 +2284,201 @@ def api_llegada():
         )
     )
 
+    if not alumno_id:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "Falta alumno_id."
+
+        }), 400
+
     alumno = obtener_alumno(
         alumno_id
     )
 
-    if not alumno:
+    if alumno is None:
 
         return jsonify({
+
             "ok": False,
+
             "mensaje":
                 "Alumno inexistente."
-        })
 
-    ahora = datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+        }), 404
+
+    fecha = ahora()
 
     conexion = conectar_db()
 
-    conexion.execute("""
+    conexion.execute(
+        """
         UPDATE alumnos
-        SET presente = 1,
+
+        SET
+            presente = 1,
             llego_tarde = 1,
             hora_llegada = ?,
-            trajo_celular = ?
-        WHERE id = ?
-    """, (
-        ahora,
-        int(trajo_celular),
-        alumno_id
-    ))
+            trajo_celular = ?,
+            se_retiro = 0
 
-    conexion.execute("""
-        INSERT INTO eventos (
-            alumno_id,
-            tipo,
-            fecha_hora,
-            descripcion
+        WHERE id = ?
+        """,
+        (
+            fecha,
+            1 if trajo_celular else 0,
+            alumno_id
         )
-        VALUES (?, ?, ?, ?)
-    """, (
-        alumno_id,
-        "llegada_tarde",
-        ahora,
-        "Llegada tarde registrada"
-    ))
+    )
 
     conexion.commit()
+
     conexion.close()
 
+    registrar_evento(
+
+        alumno_id,
+
+        "llegada_tarde",
+
+        (
+            "Llegada tarde registrada. "
+            f"Trajo celular: "
+            f"{trajo_celular}"
+        )
+
+    )
+
     return jsonify({
+
         "ok": True,
-        "hora": ahora
+
+        "hora": fecha
+
     })
 
 
 # ============================================================
-# RETIRO
+# API CELULAR
+# ============================================================
+
+@app.route(
+    "/api/alumno/<int:alumno_id>/celular",
+    methods=["POST"]
+)
+def api_celular(
+    alumno_id
+):
+
+    datos = (
+        request.get_json(
+            silent=True
+        )
+        or {}
+    )
+
+    trajo = bool(
+        datos.get(
+            "trajo",
+            False
+        )
+    )
+
+    alumno = obtener_alumno(
+        alumno_id
+    )
+
+    if alumno is None:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "Alumno inexistente."
+
+        }), 404
+
+    conexion = conectar_db()
+
+    conexion.execute(
+        """
+        UPDATE alumnos
+
+        SET trajo_celular = ?
+
+        WHERE id = ?
+        """,
+        (
+            1 if trajo else 0,
+            alumno_id
+        )
+    )
+
+    conexion.commit()
+
+    conexion.close()
+
+    return jsonify({
+
+        "ok": True,
+
+        "trajo":
+            trajo
+
+    })
+
+
+# ============================================================
+# API ABRIR LOCKER
+# ============================================================
+
+@app.route(
+    "/api/locker/abrir",
+    methods=["POST"]
+)
+def api_abrir_locker():
+
+    if locker_abierto:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "El locker ya está abierto."
+
+        })
+
+    hilo = threading.Thread(
+
+        target=abrir_locker,
+
+        args=(
+            RELAY_OPEN_SECONDS,
+        ),
+
+        daemon=True
+
+    )
+
+    hilo.start()
+
+    return jsonify({
+
+        "ok": True,
+
+        "mensaje":
+            "Locker abierto."
+
+    })
+
+
+# ============================================================
+# API RETIRO
 # ============================================================
 
 @app.route(
@@ -1462,7 +2490,8 @@ def api_retiro():
     datos = (
         request.get_json(
             silent=True
-        ) or {}
+        )
+        or {}
     )
 
     alumno_id = datos.get(
@@ -1480,75 +2509,125 @@ def api_retiro():
         "compartimento"
     )
 
+    if not alumno_id:
+
+        return jsonify({
+
+            "ok": False,
+
+            "mensaje":
+                "Falta alumno_id."
+
+        }), 400
+
     alumno = obtener_alumno(
         alumno_id
     )
 
-    if not alumno:
+    if alumno is None:
 
         return jsonify({
+
             "ok": False,
+
             "mensaje":
                 "Alumno inexistente."
-        })
 
-    ahora = datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+        }), 404
+
+    # --------------------------------------------------------
+    # Si retira celular, comprobar compartimento
+    # --------------------------------------------------------
+
+    if retiro_celular:
+
+        if compartimento is None:
+
+            compartimento = alumno[
+                "compartimento"
+            ]
+
+        try:
+
+            compartimento = int(
+                compartimento
+            )
+
+        except Exception:
+
+            return jsonify({
+
+                "ok": False,
+
+                "mensaje":
+                    "Compartimento inválido."
+
+            }), 400
+
+        if (
+            compartimento
+            != alumno["compartimento"]
+        ):
+
+            return jsonify({
+
+                "ok": False,
+
+                "mensaje":
+                    "El compartimento no corresponde "
+                    "al alumno."
+
+            }), 400
+
+    fecha = ahora()
 
     conexion = conectar_db()
 
-    conexion.execute("""
+    conexion.execute(
+        """
         UPDATE alumnos
-        SET se_retiro = 1,
-            hora_retiro = ?
-        WHERE id = ?
-    """, (
-        ahora,
-        alumno_id
-    ))
 
-    conexion.execute("""
-        INSERT INTO eventos (
-            alumno_id,
-            tipo,
-            fecha_hora,
-            descripcion
-        )
-        VALUES (?, ?, ?, ?)
-    """, (
-        alumno_id,
-        "retiro",
-        ahora,
+        SET
+            se_retiro = 1,
+            hora_retiro = ?
+
+        WHERE id = ?
+        """,
         (
-            "Retiro con celular"
-            if retiro_celular
-            else "Retiro sin celular"
+            fecha,
+            alumno_id
         )
-    ))
+    )
 
     conexion.commit()
+
     conexion.close()
 
-    # Si retira el celular, encendemos el LED
-    if retiro_celular and compartimento:
+    registrar_evento(
 
-        hilo = threading.Thread(
-            target=encender_led,
-            args=(int(compartimento), 2),
-            daemon=True
+        alumno_id,
+
+        "retiro",
+
+        (
+            "Retiro registrado. "
+            f"Retiro de celular: "
+            f"{retiro_celular}"
         )
 
-        hilo.start()
+    )
 
     return jsonify({
+
         "ok": True,
-        "hora": ahora
+
+        "hora": fecha
+
     })
 
 
 # ============================================================
-# FINALIZAR HORA
+# API FINALIZAR
 # ============================================================
 
 @app.route(
@@ -1557,41 +2636,54 @@ def api_retiro():
 )
 def api_finalizar():
 
-    print(
-        "Finalizando hora."
-    )
+    global sistema_finalizado
+
+    sistema_finalizado = True
 
     return jsonify({
-        "ok": True
+
+        "ok": True,
+
+        "mensaje":
+            "Hora finalizada."
+
     })
 
 
 # ============================================================
-# LIMPIEZA
+# LIMPIAR GPIO
 # ============================================================
 
 def limpiar():
 
-    if GPIO_AVAILABLE:
+    if not GPIO_AVAILABLE:
 
-        try:
-            GPIO.output(
-                RELAY_PIN,
-                GPIO.LOW
-            )
-        except Exception:
-            pass
+        return
+
+    try:
+
+        GPIO.output(
+            RELAY_PIN,
+            GPIO.LOW
+            if RELAY_ACTIVE_HIGH
+            else GPIO.HIGH
+        )
+
+    except Exception:
+
+        pass
+
+    try:
 
         GPIO.cleanup()
+
+    except Exception:
+
+        pass
 
     print(
         "GPIO liberados."
     )
-
-
-atexit.register(
-    limpiar
-)
 
 
 # ============================================================
@@ -1601,22 +2693,37 @@ atexit.register(
 if __name__ == "__main__":
 
     print("=" * 60)
-    print("SISTEMA DE LOCKER")
-    print("RASPBERRY PI")
+
+    print(
+        "SISTEMA DE LOCKER"
+    )
+
+    print(
+        "Raspberry Pi 3"
+    )
+
     print("=" * 60)
 
+    # --------------------------------------------------------
+    # BASE DE DATOS
+    # --------------------------------------------------------
+
     inicializar_db()
+
+    # --------------------------------------------------------
+    # GPIO
+    # --------------------------------------------------------
 
     configurar_gpio()
 
     # --------------------------------------------------------
-    # Detectar lector
+    # LECTOR
     # --------------------------------------------------------
 
     if GI_AVAILABLE:
 
         print(
-            "PyGObject disponible."
+            "GI/PyGObject disponible."
         )
 
         if fingerprint_manager.obtener_dispositivo():
@@ -1628,30 +2735,95 @@ if __name__ == "__main__":
         else:
 
             print(
-                "ADVERTENCIA: no se pudo obtener el lector."
+                "ADVERTENCIA: "
+                "no se pudo obtener el lector."
             )
 
     else:
 
         print(
-            "ADVERTENCIA: GI/PyGObject no disponible."
+            "ADVERTENCIA: "
+            "GI/PyGObject no disponible."
         )
 
+    # --------------------------------------------------------
+    # INFORMACIÓN
+    # --------------------------------------------------------
+
     print()
+
     print(
-        "Servidor iniciado."
+        "Pines GPIO:"
     )
+
     print(
-        "Puerto: 5000"
+        f"  Relé: GPIO {RELAY_PIN}"
     )
+
     print(
-        "Acceso: http://IP-DE-LA-RASPBERRY:5000"
+        f"  LED 1: GPIO {LED_PINS[1]}"
     )
+
+    print(
+        f"  LED 2: GPIO {LED_PINS[2]}"
+    )
+
+    print(
+        f"  LED 3: GPIO {LED_PINS[3]}"
+    )
+
+    print(
+        f"  LED 4: GPIO {LED_PINS[4]}"
+    )
+
+    print(
+        f"  Botón 1: GPIO {BUTTON_PINS[1]}"
+    )
+
+    print(
+        f"  Botón 2: GPIO {BUTTON_PINS[2]}"
+    )
+
+    print(
+        f"  Botón 3: GPIO {BUTTON_PINS[3]}"
+    )
+
+    print(
+        f"  Botón 4: GPIO {BUTTON_PINS[4]}"
+    )
+
+    print()
+
+    print(
+        "Servidor:"
+    )
+
+    print(
+        f"http://IP-DE-LA-RASPBERRY:{PORT}"
+    )
+
     print("=" * 60)
 
-    app.run(
-        host="0.0.0.0",
-        port=5000,
-        debug=False,
-        threaded=True
-    )
+    try:
+
+        app.run(
+
+            host=HOST,
+
+            port=PORT,
+
+            debug=False,
+
+            threaded=True
+
+        )
+
+    except KeyboardInterrupt:
+
+        print(
+            "\nServidor detenido."
+        )
+
+    finally:
+
+        limpiar()
