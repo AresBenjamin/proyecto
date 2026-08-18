@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Sistema de Locker
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
+</head>
+
+<body>
+
+<!-- =========================================================
+     LOGIN
+     ========================================================= -->
+
+<section
+    id="pantallaLogin"
+    class="pantalla"
+>
+
+    <main class="contenedor">
+
+        <h1>
+            Sistema de Locker
+        </h1>
+
+        <h2>
+            Identificación
+        </h2>
+
+        <p>
+            Profesor o preceptor
+        </p>
+
+        <div class="esperando">
+
+            <h3>
+                Coloque su huella
+            </h3>
+
+            <button
+                id="botonHuella"
+                onclick="iniciarLogin()"
+            >
+                LEER HUELLA
+            </button>
+
+            <div
+                id="ledLogin"
+                class="led"
+            ></div>
+
+        </div>
+
+        <p
+            id="mensajeLogin"
+            class="mensaje"
+        >
+            Esperando identificación...
+        </p>
+
+    </main>
+
+</section>
+
+
+<!-- =========================================================
+     MENÚ
+     ========================================================= -->
+
+<section
+    id="pantallaMenu"
+    class="pantalla"
+    style="display:none"
+>
+
+    <main class="contenedor">
+
+        <h1>
+            Menú principal
+        </h1>
+
+        <p>
+            Seleccione una opción
+        </p>
+
+        <div class="menu">
+
+            <button
+                onclick="mostrarPantalla('pantallaAsistencia')"
+            >
+                TOMAR LISTA
+            </button>
+
+            <button
+                class="boton-verde"
+                onclick="mostrarPantalla('pantallaLlegada')"
+            >
+                LLEGADA TARDE
+            </button>
+
+            <button
+                class="boton-amarillo"
+                onclick="mostrarPantalla('pantallaRetiro')"
+            >
+                RETIRO
+            </button>
+
+            <button
+                class="boton-rojo"
+                onclick="finalizarHora()"
+            >
+                TERMINAR HORA
+            </button>
+
+        </div>
+
+    </main>
+
+</section>
+
+
+<!-- =========================================================
+     ASISTENCIA
+     ========================================================= -->
+
+<section
+    id="pantallaAsistencia"
+    class="pantalla"
+    style="display:none"
+>
+
+    <main class="contenedor">
+
+        <h1>
+            Toma de lista
+        </h1>
+
+        <p
+            id="progreso"
+            class="progreso"
+        ></p>
+
+        <div
+            id="alumnoActual"
+            class="alumno"
+        >
+
+            <div
+                id="numeroAlumno"
+                class="numero"
+            ></div>
+
+            <div
+                id="nombreAlumno"
+                class="nombre"
+            ></div>
+
+        </div>
+
+
+        <!-- PRESENTE -->
+
+        <div
+            id="preguntaPresente"
+            class="pregunta"
+        >
+
+            <h2>
+                ¿El alumno está presente?
+            </h2>
+
+            <button
+                class="boton-verde"
+                onclick="marcarPresente()"
+            >
+                SÍ
+            </button>
+
+            <button
+                class="boton-rojo"
+                onclick="marcarAusente()"
+            >
+                NO
+            </button>
+
+        </div>
+
+
+        <!-- CELULAR -->
+
+        <div
+            id="preguntaCelular"
+            class="pregunta"
+            style="display:none"
+        >
+
+            <h2>
+                ¿Trajo el celular?
+            </h2>
+
+            <button
+                class="boton-verde"
+                onclick="trajoCelular()"
+            >
+                SÍ
+            </button>
+
+            <button
+                class="boton-rojo"
+                onclick="noTrajoCelular()"
+            >
+                NO
+            </button>
+
+        </div>
+
+
+        <!-- ESPERANDO CELULAR -->
+
+        <div
+            id="esperandoCelular"
+            class="esperando"
+            style="display:none"
+        >
+
+            <h2>
+                Coloque el celular
+            </h2>
+
+            <p>
+                Compartimento:
+            </p>
+
+            <div
+                id="numeroCompartimento"
+                class="nombre"
+            ></div>
+
+            <p id="mensajeCelular">
+                Coloque el celular y presione
+                el botón correspondiente.
+            </p>
+
+            <div
+                id="ledConfirmacion"
+                class="led"
+            ></div>
+
+        </div>
+
+
+        <!-- ESPERANDO HUELLA -->
+
+        <div
+            id="esperandoHuella"
+            class="esperando"
+            style="display:none"
+        >
+
+            <h2>
+                Identificación
+            </h2>
+
+            <p id="mensajeHuella">
+                Coloque su huella en el lector.
+            </p>
+
+        </div>
+
+
+        <!-- FINAL -->
+
+        <div
+            id="listaTerminada"
+            class="resultado"
+            style="display:none"
+        >
+
+            <h2>
+                Lista terminada
+            </h2>
+
+            <p id="mensajeFinal">
+                La toma de lista terminó.
+            </p>
+
+            <button
+                onclick="mostrarPantalla('pantallaMenu')"
+            >
+                VOLVER AL MENÚ
+            </button>
+
+        </div>
+
+    </main>
+
+</section>
+
+
+<!-- =========================================================
+     LLEGADA TARDE
+     ========================================================= -->
+
+<section
+    id="pantallaLlegada"
+    class="pantalla"
+    style="display:none"
+>
+
+    <main class="contenedor">
+
+        <h1>
+            Llegada tarde
+        </h1>
+
+        <div
+            id="listaAusentes"
+        >
+
+            <h2>
+                Seleccione el alumno
+            </h2>
+
+        </div>
+
+
+        <div
+            id="alumnoSeleccionado"
+            class="alumno"
+            style="display:none"
+        >
+
+            <div
+                id="numeroSeleccionado"
+                class="numero"
+            ></div>
+
+            <div
+                id="nombreSeleccionado"
+                class="nombre"
+            ></div>
+
+        </div>
+
+
+        <div
+            id="esperandoHuellaLlegada"
+            class="esperando"
+            style="display:none"
+        >
+
+            <h2>
+                Verificación
+            </h2>
+
+            <p id="mensajeHuellaLlegada">
+                Coloque la huella del alumno.
+            </p>
+
+            <button
+                onclick="verificarHuellaLlegada()"
+            >
+                LEER HUELLA
+            </button>
+
+        </div>
+
+
+        <div
+            id="preguntaCelularLlegada"
+            class="pregunta"
+            style="display:none"
+        >
+
+            <h2>
+                ¿Trajo el celular?
+            </h2>
+
+            <button
+                class="boton-verde"
+                onclick="llegadaConCelular()"
+            >
+                SÍ
+            </button>
+
+            <button
+                class="boton-rojo"
+                onclick="llegadaSinCelular()"
+            >
+                NO
+            </button>
+
+        </div>
+
+
+        <div
+            id="esperandoCelularLlegada"
+            class="esperando"
+            style="display:none"
+        >
+
+            <h2>
+                Coloque el celular
+            </h2>
+
+            <p>
+                Compartimento:
+            </p>
+
+            <div
+                id="numeroCompartimentoLlegada"
+                class="nombre"
+            ></div>
+
+            <p id="mensajeCelularLlegada">
+                Coloque el celular y presione
+                el botón.
+            </p>
+
+            <div
+                id="ledConfirmacionLlegada"
+                class="led"
+            ></div>
+
+        </div>
+
+
+        <div
+            id="resultadoLlegada"
+            class="resultado"
+            style="display:none"
+        ></div>
+
+
+        <button
+            onclick="mostrarPantalla('pantallaMenu')"
+        >
+            VOLVER AL MENÚ
+        </button>
+
+    </main>
+
+</section>
+
+
+<!-- =========================================================
+     RETIRO
+     ========================================================= -->
+
+<section
+    id="pantallaRetiro"
+    class="pantalla"
+    style="display:none"
+>
+
+    <main class="contenedor">
+
+        <h1>
+            Retiro de alumno
+        </h1>
+
+
+        <div
+            id="inicioRetiro"
+            class="pregunta"
+        >
+
+            <p>
+                El alumno deberá colocar
+                su huella para identificarse.
+            </p>
+
+            <button
+                onclick="iniciarRetiro()"
+            >
+                LEER HUELLA
+            </button>
+
+        </div>
+
+
+        <div
+            id="esperandoHuellaRetiro"
+            class="esperando"
+            style="display:none"
+        >
+
+            <h2>
+                Identificación
+            </h2>
+
+            <p id="mensajeHuellaRetiro">
+                Coloque la huella.
+            </p>
+
+        </div>
+
+
+        <div
+            id="informacionRetiro"
+            class="alumno"
+            style="display:none"
+        >
+
+            <p>
+                Alumno:
+            </p>
+
+            <div
+                id="numeroRetiro"
+                class="numero"
+            ></div>
+
+            <div
+                id="nombreRetiro"
+                class="nombre"
+            ></div>
+
+            <p>
+                Compartimento:
+            </p>
+
+            <strong
+                id="compartimentoRetiro"
+            ></strong>
+
+        </div>
+
+
+        <div
+            id="preguntaRetiro"
+            class="pregunta"
+            style="display:none"
+        >
+
+            <h2>
+                ¿El alumno tiene su celular?
+            </h2>
+
+            <button
+                class="boton-verde"
+                onclick="retirarConCelular()"
+            >
+                SÍ, RETIRA CELULAR
+            </button>
+
+            <button
+                class="boton-amarillo"
+                onclick="retirarSinCelular()"
+            >
+                NO TRAJO CELULAR
+            </button>
+
+        </div>
+
+
+        <div
+            id="resultadoRetiro"
+            class="resultado"
+            style="display:none"
+        ></div>
+
+
+        <button
+            onclick="mostrarPantalla('pantallaMenu')"
+        >
+            VOLVER AL MENÚ
+        </button>
+
+    </main>
+
+</section>
+
+
+<script
+    src="{{ url_for('static', filename='app.js') }}"
+></script>
+
+</body>
+</html>
