@@ -1,106 +1,158 @@
 // ============================================================
-// SISTEMA DE LOCKER
-// JAVASCRIPT PRINCIPAL
-// ============================================================
-
-
-// ============================================================
-// VARIABLES
+// SISTEMA DE LOCKER ESCOLAR
+// JavaScript principal
+// Compatible con index.html, style.css y app.py
 // ============================================================
 
 let alumnos = [];
-
 let alumnoActual = 0;
-
 let alumnoSeleccionado = null;
-
 let alumnoRetiro = null;
 
+let alumnosDevolucion = [];
+let indiceDevolucion = 0;
+let operacionEnCurso = false;
+
 
 // ============================================================
-// INICIO
+// UTILIDADES
 // ============================================================
 
-document.addEventListener(
-    "DOMContentLoaded",
-    function () {
+function mostrar(id) {
+    const elemento = document.getElementById(id);
 
-        console.log(
-            "Sistema de locker iniciado."
-        );
-
-        mostrarPantalla(
-            "pantallaLogin"
-        );
-
+    if (elemento) {
+        elemento.style.display = "block";
     }
-);
+}
+
+function ocultar(id) {
+    const elemento = document.getElementById(id);
+
+    if (elemento) {
+        elemento.style.display = "none";
+    }
+}
+
+function cambiarTexto(id, texto) {
+    const elemento = document.getElementById(id);
+
+    if (elemento) {
+        elemento.textContent =
+            texto === null || typeof texto === "undefined"
+                ? ""
+                : texto;
+    }
+}
+
+function nombreCompleto(alumno) {
+    return `${alumno.nombre || ""} ${alumno.apellido || ""}`.trim();
+}
+
+function mostrarMensaje(texto, duracion = 3000) {
+    const elemento = document.getElementById("mensajeGeneral");
+
+    if (!elemento) {
+        console.log(texto);
+        return;
+    }
+
+    elemento.textContent = texto || "";
+    elemento.style.display = "block";
+
+    clearTimeout(mostrarMensaje.timer);
+
+    mostrarMensaje.timer = setTimeout(() => {
+        elemento.style.display = "none";
+    }, duracion);
+}
+
+function bloquearBoton(id, bloqueado) {
+    const boton = document.getElementById(id);
+
+    if (boton) {
+        boton.disabled = bloqueado;
+    }
+}
 
 
 // ============================================================
-// CAMBIAR PANTALLA
+// COMUNICACION CON FLASK
+// ============================================================
+
+async function jsonFetch(url, opciones = {}) {
+    let respuesta;
+
+    try {
+        respuesta = await fetch(url, opciones);
+    } catch (error) {
+        throw new Error("No se pudo conectar con Flask.");
+    }
+
+    let datos;
+
+    try {
+        datos = await respuesta.json();
+    } catch (error) {
+        throw new Error(
+            `Flask devolvio una respuesta invalida (HTTP ${respuesta.status}).`
+        );
+    }
+
+    // IMPORTANTE:
+    // Flask puede devolver HTTP 200 pero {"ok": false}.
+    // Eso tambien debe considerarse un error.
+    if (!respuesta.ok || datos.ok === false) {
+        throw new Error(
+            datos.mensaje ||
+            datos.error ||
+            `La operacion fallo (HTTP ${respuesta.status}).`
+        );
+    }
+
+    return datos;
+}
+
+function postJSON(url, cuerpo = {}) {
+    return jsonFetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(cuerpo)
+    });
+}
+
+
+// ============================================================
+// CAMBIO DE PANTALLA
 // ============================================================
 
 function mostrarPantalla(id) {
+    document.querySelectorAll(".pantalla").forEach((pantalla) => {
+        pantalla.style.display = "none";
+    });
 
-    const pantallas =
-        document.querySelectorAll(
-            ".pantalla"
-        );
+    const pantalla = document.getElementById(id);
 
-
-    pantallas.forEach(
-        function (pantalla) {
-
-            pantalla.style.display =
-                "none";
-
-        }
-    );
-
-
-    const pantalla =
-        document.getElementById(id);
-
-
-    if (pantalla) {
-
-        pantalla.style.display =
-            "block";
-
+    if (!pantalla) {
+        console.error(`No existe la pantalla ${id}.`);
+        return;
     }
 
+    pantalla.style.display = "block";
 
-    // --------------------------------------------------------
-    // Acciones al entrar a determinadas pantallas
-    // --------------------------------------------------------
-
-    if (
-        id === "pantallaAsistencia"
-    ) {
-
+    if (id === "pantallaAsistencia") {
         cargarAlumnos();
-
     }
 
-
-    if (
-        id === "pantallaLlegada"
-    ) {
-
+    if (id === "pantallaLlegada") {
         cargarAusentes();
-
     }
 
-
-    if (
-        id === "pantallaRetiro"
-    ) {
-
+    if (id === "pantallaRetiro") {
         prepararRetiro();
-
     }
-
 }
 
 
@@ -109,4603 +161,441 @@ function mostrarPantalla(id) {
 // ============================================================
 
 async function iniciarLogin() {
-
-    const boton =
-        document.getElementById(
-            "botonHuella"
-        );
-
-
-    const mensaje =
-        document.getElementById(
-            "mensajeLogin"
-        );
-
-
-    if (boton) {
-
-        boton.disabled = true;
-
+    if (operacionEnCurso) {
+        return;
     }
 
+    operacionEnCurso = true;
 
-    if (mensaje) {
+    bloquearBoton("botonHuella", true);
 
-        mensaje.innerText =
-            "Coloque la huella del profesor/preceptor...";
-
-    }
-
+    cambiarTexto(
+        "mensajeLogin",
+        "Coloque la huella del profesor o preceptor..."
+    );
 
     try {
-
-        // ----------------------------------------------------
-        // CORREGIDO:
-        // Python tiene /api/login/esperar-huella
-        // ----------------------------------------------------
-
-        const respuesta =
-            await fetch(
-                "/api/login/esperar-huella",
-                {
-                    method: "POST"
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            if (mensaje) {
-
-                mensaje.innerText =
-                    datos.mensaje ||
-                    "Huella no reconocida.";
-
-            }
-
-
-            if (boton) {
-
-                boton.disabled = false;
-
-            }
-
-
-            return;
-
-        }
-
-
-        if (mensaje) {
-
-            mensaje.innerText =
-                "✓ Identificación correcta.";
-
-        }
-
-
-        setTimeout(
-            function () {
-
-                mostrarPantalla(
-                    "pantallaMenu"
-                );
-
-            },
-            800
+        const datos = await postJSON(
+            "/api/login/esperar-huella"
         );
 
+        cambiarTexto(
+            "mensajeLogin",
+            `✓ Identificacion correcta (${datos.rol || "usuario autorizado"}).`
+        );
+
+        setTimeout(() => {
+            operacionEnCurso = false;
+            mostrarPantalla("pantallaMenu");
+        }, 700);
 
     } catch (error) {
+        console.error("Error de login:", error);
 
-        console.error(
-            "Error en login:",
-            error
+        cambiarTexto(
+            "mensajeLogin",
+            error.message
         );
 
-
-        if (mensaje) {
-
-            mensaje.innerText =
-                "Error de comunicación con la Raspberry Pi.";
-
-        }
-
-
-        if (boton) {
-
-            boton.disabled = false;
-
-        }
-
+        bloquearBoton("botonHuella", false);
+        operacionEnCurso = false;
     }
-
 }
 
 
 // ============================================================
-// CARGAR ALUMNOS
+// ASISTENCIA
 // ============================================================
 
 async function cargarAlumnos() {
-
     try {
+        const datos = await jsonFetch(
+            "/api/alumnos"
+        );
 
-        const respuesta =
-            await fetch(
-                "/api/alumnos"
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            mostrarMensaje(
-                "No se pudieron cargar los alumnos."
-            );
-
-
-            return;
-
-        }
-
-
-        alumnos =
-            datos.alumnos || [];
-
+        alumnos = Array.isArray(datos.alumnos)
+            ? datos.alumnos
+            : [];
 
         alumnoActual = 0;
 
-
         mostrarAlumno();
 
-
     } catch (error) {
-
-        console.error(
-            "Error cargando alumnos:",
-            error
-        );
-
-
-        mostrarMensaje(
-            "Error cargando alumnos."
-        );
-
+        console.error("Error cargando alumnos:", error);
+        mostrarMensaje(error.message);
     }
-
 }
-
-
-// ============================================================
-// MOSTRAR ALUMNO
-// ============================================================
 
 function mostrarAlumno() {
+    ocultar("preguntaCelular");
+    ocultar("esperandoCelular");
+    ocultar("esperandoHuella");
+    ocultar("listaTerminada");
 
-    ocultar(
-        "preguntaCelular"
-    );
-
-
-    ocultar(
-        "esperandoCelular"
-    );
-
-
-    ocultar(
-        "esperandoHuella"
-    );
-
-
-    ocultar(
-        "listaTerminada"
-    );
-
-
-    mostrar(
-        "preguntaPresente"
-    );
-
-
-    if (
-        alumnoActual >= alumnos.length
-    ) {
-
+    if (alumnoActual >= alumnos.length) {
         finalizarLista();
-
         return;
-
     }
 
+    const alumno = alumnos[alumnoActual];
 
-    const alumno =
-        alumnos[alumnoActual];
-
-
-    cambiarTexto(
-        "numeroAlumno",
-        alumno.numero_lista
-    );
-
-
-    cambiarTexto(
-        "nombreAlumno",
-        alumno.nombre +
-        " " +
-        alumno.apellido
-    );
-
-
+    cambiarTexto("numeroAlumno", alumno.numero_lista);
+    cambiarTexto("nombreAlumno", nombreCompleto(alumno));
     cambiarTexto(
         "progreso",
-        "Alumno " +
-        (alumnoActual + 1) +
-        " de " +
-        alumnos.length
+        `Alumno ${alumnoActual + 1} de ${alumnos.length}`
     );
 
+    mostrar("preguntaPresente");
 }
-
-
-// ============================================================
-// PRESENTE
-// ============================================================
 
 function marcarPresente() {
-
-    ocultar(
-        "preguntaPresente"
-    );
-
-
-    mostrar(
-        "preguntaCelular"
-    );
-
+    ocultar("preguntaPresente");
+    mostrar("preguntaCelular");
 }
 
-
-// ============================================================
-// AUSENTE
-// ============================================================
-
 async function marcarAusente() {
-
-    const alumno =
-        alumnos[alumnoActual];
-
-
-    if (!alumno) {
-
+    if (operacionEnCurso) {
         return;
-
     }
 
+    const alumno = alumnos[alumnoActual];
+
+    if (!alumno) {
+        return;
+    }
+
+    operacionEnCurso = true;
 
     try {
-
-        const respuesta =
-            await fetch(
-                "/api/asistencia/ausente",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumno.id
-
-                    })
-
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            mostrarMensaje(
-                datos.mensaje ||
-                "No se pudo registrar la ausencia."
-            );
-
-
-            return;
-
-        }
-
+        await postJSON(
+            "/api/asistencia/ausente",
+            {
+                alumno_id: alumno.id
+            }
+        );
 
         siguienteAlumno();
 
-
     } catch (error) {
+        console.error("Error registrando ausencia:", error);
+        mostrarMensaje(error.message);
 
-        console.error(
-            "Error registrando ausencia:",
-            error
-        );
-
-
-        mostrarMensaje(
-            "Error registrando ausencia."
-        );
-
+    } finally {
+        operacionEnCurso = false;
     }
-
 }
 
 
 // ============================================================
-// TRAJO CELULAR
+// ASISTENCIA - CON CELULAR
 // ============================================================
 
 async function trajoCelular() {
-
-    const alumno =
-        alumnos[alumnoActual];
-
-
-    if (!alumno) {
-
+    if (operacionEnCurso) {
         return;
-
     }
 
+    const alumno = alumnos[alumnoActual];
 
-    ocultar(
-        "preguntaCelular"
-    );
+    if (!alumno) {
+        return;
+    }
 
+    operacionEnCurso = true;
+
+    ocultar("preguntaCelular");
+    mostrar("esperandoCelular");
 
     cambiarTexto(
         "numeroCompartimento",
         alumno.compartimento
     );
 
-
     cambiarTexto(
         "mensajeCelular",
         "Abriendo locker..."
     );
 
-
-    mostrar(
-        "esperandoCelular"
-    );
-
-
     try {
-
-        // ----------------------------------------------------
-        // ABRIR LOCKER
-        // ----------------------------------------------------
-
-        const apertura =
-            await fetch(
-                "/api/locker/abrir",
-                {
-                    method: "POST"
-                }
-            );
-
-
-        const datosApertura =
-            await apertura.json();
-
-
-        if (!datosApertura.ok) {
-
-            cambiarTexto(
-                "mensajeCelular",
-                datosApertura.mensaje ||
-                "No se pudo abrir el locker."
-            );
-
-
-            return;
-
-        }
-
+        await postJSON(
+            "/api/locker/abrir"
+        );
 
         cambiarTexto(
             "mensajeCelular",
-
-            "Coloque el celular en el compartimento " +
-            alumno.compartimento +
-            " y presione el botón."
+            `Coloque el celular en el compartimento ${alumno.compartimento} y presione el boton.`
         );
 
-
-        // ----------------------------------------------------
-        // ESPERAR BOTÓN
-        // ----------------------------------------------------
-
-        const respuesta =
-            await fetch(
-                "/api/celular/esperar-boton",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumno.id,
-
-                        compartimento:
-                            alumno.compartimento
-
-                    })
-
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeCelular",
-                datos.mensaje ||
-                "No se registró la colocación del celular."
-            );
-
-
-            return;
-
-        }
-
+        await postJSON(
+            "/api/celular/esperar-boton",
+            {
+                alumno_id: alumno.id,
+                compartimento: alumno.compartimento
+            }
+        );
 
         cambiarTexto(
             "mensajeCelular",
             "✓ Celular colocado correctamente."
         );
 
-
-        mostrarLED();
-
-
-        // ----------------------------------------------------
-        // DESPUÉS DEL CELULAR:
-        // PEDIR HUELLA
-        // ----------------------------------------------------
-
-        setTimeout(
-            function () {
-
-                pedirHuellaAlumno();
-
-            },
-            700
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error colocando celular:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeCelular",
-            "Error de comunicación."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// PEDIR HUELLA DEL ALUMNO
-// ============================================================
-
-function pedirHuellaAlumno() {
-
-    ocultar(
-        "esperandoCelular"
-    );
-
-
-    mostrar(
-        "esperandoHuella"
-    );
-
-
-    cambiarTexto(
-        "mensajeHuella",
-        "✓ Celular registrado. Ahora coloque su huella."
-    );
-
-
-    verificarHuellaAlumno();
-
-}
-
-
-// ============================================================
-// NO TRAJO CELULAR
-// ============================================================
-
-function noTrajoCelular() {
-
-    ocultar(
-        "preguntaCelular"
-    );
-
-
-    mostrar(
-        "esperandoHuella"
-    );
-
-
-    cambiarTexto(
-        "mensajeHuella",
-        "Coloque la huella del alumno."
-    );
-
-
-    registrarHuellaSinCelular();
-
-}
-
-
-// ============================================================
-// VERIFICAR HUELLA DEL ALUMNO ACTUAL
-// ============================================================
-
-async function verificarHuellaAlumno() {
-
-    const alumno =
-        alumnos[alumnoActual];
-
-
-    if (!alumno) {
-
-        return;
-
-    }
-
-
-    try {
-
-        // ----------------------------------------------------
-        // CORREGIDO:
-        // Python tiene:
-        // /api/alumno/<id>/verificar-huella
-        // ----------------------------------------------------
-
-        const respuesta =
-            await fetch(
-
-                "/api/alumno/" +
-                alumno.id +
-                "/verificar-huella",
-
-                {
-                    method: "POST"
-                }
-
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeHuella",
-
-                datos.mensaje ||
-                "La huella no corresponde."
-            );
-
-
-            // No avanzar.
-            setTimeout(
-                function () {
-
-                    cambiarTexto(
-                        "mensajeHuella",
-                        "Vuelva a colocar la huella del alumno."
-                    );
-
-                    verificarHuellaAlumno();
-
-                },
-                1200
-            );
-
-
-            return;
-
-        }
-
-
-        // ----------------------------------------------------
-        // HUELLA CORRECTA
-        // ----------------------------------------------------
+        mostrarLED("ledConfirmacion");
+
+        // El lector se activa DESPUES de confirmar el celular.
+        ocultar("esperandoCelular");
+        mostrar("esperandoHuella");
 
         cambiarTexto(
             "mensajeHuella",
-            "✓ Huella reconocida."
+            "Coloque la huella del alumno."
         );
 
-
-        // ----------------------------------------------------
-        // REGISTRAR ASISTENCIA
-        // ----------------------------------------------------
-
-        const registro =
-            await fetch(
-                "/api/asistencia",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumno.id,
-
-                        estado:
-                            "PRESENTE",
-
-                        trajo_celular:
-                            true
-
-                    })
-
-                }
-            );
-
-
-        const resultado =
-            await registro.json();
-
-
-        if (!resultado.ok) {
-
-            cambiarTexto(
-                "mensajeHuella",
-
-                resultado.mensaje ||
-                "No se pudo registrar la asistencia."
-            );
-
-
-            return;
-
-        }
-
-
-        // ----------------------------------------------------
-        // SIGUIENTE ALUMNO
-        // ----------------------------------------------------
-
-        setTimeout(
-            siguienteAlumno,
-            1000
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error verificando huella:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeHuella",
-            "Error de comunicación con el lector."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// REGISTRAR HUELLA SIN CELULAR
-// ============================================================
-
-async function registrarHuellaSinCelular() {
-
-    const alumno =
-        alumnos[alumnoActual];
-
-
-    if (!alumno) {
-
-        return;
-
-    }
-
-
-    try {
-
-        // ----------------------------------------------------
-        // CORREGIDO:
-        // Verificar alumno específico
-        // ----------------------------------------------------
-
-        const respuesta =
-            await fetch(
-
-                "/api/alumno/" +
-                alumno.id +
-                "/verificar-huella",
-
-                {
-                    method: "POST"
-                }
-
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeHuella",
-
-                datos.mensaje ||
-                "La huella no corresponde."
-            );
-
-
-            setTimeout(
-                function () {
-
-                    cambiarTexto(
-                        "mensajeHuella",
-                        "Vuelva a colocar la huella del alumno."
-                    );
-
-                    registrarHuellaSinCelular();
-
-                },
-                1200
-            );
-
-
-            return;
-
-        }
-
-
-        cambiarTexto(
-            "mensajeHuella",
-            "✓ Huella reconocida."
-        );
-
-
-        // ----------------------------------------------------
-        // REGISTRAR ASISTENCIA SIN CELULAR
-        // ----------------------------------------------------
-
-        const registro =
-            await fetch(
-                "/api/asistencia",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumno.id,
-
-                        estado:
-                            "PRESENTE_SIN_CELULAR",
-
-                        trajo_celular:
-                            false
-
-                    })
-
-                }
-            );
-
-
-        const resultado =
-            await registro.json();
-
-
-        if (!resultado.ok) {
-
-            cambiarTexto(
-                "mensajeHuella",
-
-                resultado.mensaje ||
-                "No se pudo registrar la asistencia."
-            );
-
-
-            return;
-
-        }
-
-
-        setTimeout(
-            siguienteAlumno,
-            1000
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error registrando alumno sin celular:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeHuella",
-            "Error de comunicación con el lector."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// SIGUIENTE ALUMNO
-// ============================================================
-
-function siguienteAlumno() {
-
-    alumnoActual++;
-
-
-    mostrarAlumno();
-
-}
-
-
-// ============================================================
-// FINALIZAR LISTA
-// ============================================================
-
-function finalizarLista() {
-
-    ocultar(
-        "preguntaPresente"
-    );
-
-
-    ocultar(
-        "preguntaCelular"
-    );
-
-
-    ocultar(
-        "esperandoCelular"
-    );
-
-
-    ocultar(
-        "esperandoHuella"
-    );
-
-
-    mostrar(
-        "listaTerminada"
-    );
-
-
-    cambiarTexto(
-        "mensajeFinal",
-        "La toma de lista terminó correctamente."
-    );
-
-}
-
-
-// ============================================================
-// LED VISUAL
-// ============================================================
-
-function mostrarLED() {
-
-    const led =
-        document.getElementById(
-            "ledConfirmacion"
-        );
-
-
-    if (!led) {
-
-        return;
-
-    }
-
-
-    led.classList.add(
-        "led-activo"
-    );
-
-
-    setTimeout(
-        function () {
-
-            led.classList.remove(
-                "led-activo"
-            );
-
-        },
-        3000
-    );
-
-}
-
-
-// ============================================================
-// LLEGADA TARDE
-// ============================================================
-
-async function cargarAusentes() {
-
-    alumnoSeleccionado = null;
-
-
-    ocultar(
-        "alumnoSeleccionado"
-    );
-
-
-    ocultar(
-        "esperandoHuellaLlegada"
-    );
-
-
-    ocultar(
-        "preguntaCelularLlegada"
-    );
-
-
-    ocultar(
-        "esperandoCelularLlegada"
-    );
-
-
-    ocultar(
-        "resultadoLlegada"
-    );
-
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/alumnos/ausentes"
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        const lista =
-            document.getElementById(
-                "listaAusentes"
-            );
-
-
-        if (!lista) {
-
-            return;
-
-        }
-
-
-        lista.innerHTML = "";
-
-
-        if (
-            !datos.ok ||
-            !datos.alumnos ||
-            datos.alumnos.length === 0
-        ) {
-
-            lista.innerHTML =
-                "<h2>No hay alumnos ausentes.</h2>";
-
-
-            return;
-
-        }
-
-
-        const titulo =
-            document.createElement(
-                "h2"
-            );
-
-
-        titulo.innerText =
-            "Seleccione el alumno que llegó:";
-
-
-        lista.appendChild(
-            titulo
-        );
-
-
-        datos.alumnos.forEach(
-            function (alumno) {
-
-                const boton =
-                    document.createElement(
-                        "button"
-                    );
-
-
-                boton.className =
-                    "alumno-boton";
-
-
-                boton.innerText =
-                    alumno.numero_lista +
-                    " - " +
-                    alumno.nombre +
-                    " " +
-                    alumno.apellido;
-
-
-                boton.onclick =
-                    function () {
-
-                        seleccionarAlumnoLlegada(
-                            alumno
-                        );
-
-                    };
-
-
-                lista.appendChild(
-                    boton
-                );
-
-            }
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error cargando ausentes:",
-            error
-        );
-
-
-        mostrarMensaje(
-            "Error cargando ausentes."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// SELECCIONAR ALUMNO LLEGADA
-// ============================================================
-
-function seleccionarAlumnoLlegada(
-    alumno
-) {
-
-    alumnoSeleccionado =
-        alumno;
-
-
-    ocultar(
-        "listaAusentes"
-    );
-
-
-    mostrar(
-        "alumnoSeleccionado"
-    );
-
-
-    cambiarTexto(
-        "numeroSeleccionado",
-        alumno.numero_lista
-    );
-
-
-    cambiarTexto(
-        "nombreSeleccionado",
-        alumno.nombre +
-        " " +
-        alumno.apellido
-    );
-
-
-    mostrar(
-        "esperandoHuellaLlegada"
-    );
-
-
-    cambiarTexto(
-        "mensajeHuellaLlegada",
-        "Coloque la huella del alumno."
-    );
-
-
-    verificarHuellaLlegada();
-
-}
-
-
-// ============================================================
-// VERIFICAR HUELLA LLEGADA
-// ============================================================
-
-async function verificarHuellaLlegada() {
-
-    if (!alumnoSeleccionado) {
-
-        return;
-
-    }
-
-
-    try {
-
-        // ----------------------------------------------------
-        // CORREGIDO
-        // ----------------------------------------------------
-
-        const respuesta =
-            await fetch(
-
-                "/api/alumno/" +
-                alumnoSeleccionado.id +
-                "/verificar-huella",
-
-                {
-                    method: "POST"
-                }
-
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeHuellaLlegada",
-
-                datos.mensaje ||
-                "La huella no corresponde."
-            );
-
-
-            // Volver a pedir huella
-            setTimeout(
-                function () {
-
-                    cambiarTexto(
-                        "mensajeHuellaLlegada",
-                        "Coloque nuevamente la huella del alumno."
-                    );
-
-                    verificarHuellaLlegada();
-
-                },
-                1200
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "esperandoHuellaLlegada"
-        );
-
-
-        mostrar(
-            "preguntaCelularLlegada"
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error verificando huella de llegada:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeHuellaLlegada",
-            "Error de comunicación."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// LLEGADA CON CELULAR
-// ============================================================
-
-async function llegadaConCelular() {
-
-    if (!alumnoSeleccionado) {
-
-        return;
-
-    }
-
-
-    ocultar(
-        "preguntaCelularLlegada"
-    );
-
-
-    mostrar(
-        "esperandoCelularLlegada"
-    );
-
-
-    cambiarTexto(
-        "numeroCompartimentoLlegada",
-        alumnoSeleccionado.compartimento
-    );
-
-
-    cambiarTexto(
-        "mensajeCelularLlegada",
-        "Abriendo locker..."
-    );
-
-
-    try {
-
-        // ----------------------------------------------------
-        // ABRIR LOCKER
-        // ----------------------------------------------------
-
-        const apertura =
-            await fetch(
-                "/api/locker/abrir",
-                {
-                    method: "POST"
-                }
-            );
-
-
-        const datosApertura =
-            await apertura.json();
-
-
-        if (!datosApertura.ok) {
-
-            cambiarTexto(
-                "mensajeCelularLlegada",
-
-                datosApertura.mensaje ||
-                "No se pudo abrir el locker."
-            );
-
-
-            return;
-
-        }
-
-
-        cambiarTexto(
-            "mensajeCelularLlegada",
-            "Coloque el celular y presione el botón."
-        );
-
-
-        // ----------------------------------------------------
-        // ESPERAR BOTÓN
-        // ----------------------------------------------------
-
-        const respuesta =
-            await fetch(
-                "/api/celular/esperar-boton",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoSeleccionado.id,
-
-                        compartimento:
-                            alumnoSeleccionado.compartimento
-
-                    })
-
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeCelularLlegada",
-
-                datos.mensaje ||
-                "No se registró la colocación del celular."
-            );
-
-
-            return;
-
-        }
-
-
-        await registrarLlegada(
-            true
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error en llegada con celular:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeCelularLlegada",
-            "Error de comunicación."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// LLEGADA SIN CELULAR
-// ============================================================
-
-async function llegadaSinCelular() {
-
-    await registrarLlegada(
-        false
-    );
-
-}
-
-
-// ============================================================
-// REGISTRAR LLEGADA
-// ============================================================
-
-async function registrarLlegada(
-    trajoCelular
-) {
-
-    if (!alumnoSeleccionado) {
-
-        return;
-
-    }
-
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/llegada",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoSeleccionado.id,
-
-                        trajo_celular:
-                            trajoCelular
-
-                    })
-
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            mostrarMensaje(
-                datos.mensaje ||
-                "No se pudo registrar la llegada."
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "preguntaCelularLlegada"
-        );
-
-
-        ocultar(
-            "esperandoCelularLlegada"
-        );
-
-
-        mostrar(
-            "resultadoLlegada"
-        );
-
-
-        cambiarTexto(
-            "resultadoLlegada",
-
-            "✓ Llegada registrada a las " +
-            datos.hora
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error registrando llegada:",
-            error
-        );
-
-
-        mostrarMensaje(
-            "Error de comunicación."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// RETIRO
-// ============================================================
-
-function prepararRetiro() {
-
-    alumnoRetiro = null;
-
-
-    ocultar(
-        "esperandoHuellaRetiro"
-    );
-
-
-    ocultar(
-        "informacionRetiro"
-    );
-
-
-    ocultar(
-        "preguntaRetiro"
-    );
-
-
-    ocultar(
-        "resultadoRetiro"
-    );
-
-
-    mostrar(
-        "inicioRetiro"
-    );
-
-}
-
-
-// ============================================================
-// INICIAR RETIRO
-// ============================================================
-
-function iniciarRetiro() {
-
-    ocultar(
-        "inicioRetiro"
-    );
-
-
-    mostrar(
-        "esperandoHuellaRetiro"
-    );
-
-
-    cambiarTexto(
-        "mensajeHuellaRetiro",
-        "Coloque la huella del alumno."
-    );
-
-
-    identificarAlumnoRetiro();
-
-}
-
-
-// ============================================================
-// IDENTIFICAR ALUMNO PARA RETIRO
-// ============================================================
-//
-// Acá NO conocemos todavía al alumno.
-// Por eso usamos la función Python:
-// fingerprint_manager.identificar_alumno()
-// mediante /api/alumno/esperar-huella
-//
-// ============================================================
-
-async function identificarAlumnoRetiro() {
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/alumno/esperar-huella",
-                {
-                    method: "POST"
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeHuellaRetiro",
-
-                datos.mensaje ||
-                "No se pudo identificar al alumno."
-            );
-
-
-            return;
-
-        }
-
-
-        // ----------------------------------------------------
-        // Guardamos los datos recibidos
-        // ----------------------------------------------------
-
-        alumnoRetiro = {
-
-            id:
-                datos.alumno_id,
-
-            alumno_id:
-                datos.alumno_id,
-
-            numero_lista:
-                datos.numero_lista,
-
-            nombre:
-                datos.nombre,
-
-            apellido:
-                datos.apellido,
-
-            compartimento:
-                datos.compartimento,
-
-            usuario_huella:
-                datos.usuario_huella
-
-        };
-
-
-        cambiarTexto(
-            "numeroRetiro",
-            datos.numero_lista
-        );
-
-
-        cambiarTexto(
-            "nombreRetiro",
-
-            datos.nombre +
-            " " +
-            datos.apellido
-        );
-
-
-        cambiarTexto(
-            "compartimentoRetiro",
-            datos.compartimento
-        );
-
-
-        ocultar(
-            "esperandoHuellaRetiro"
-        );
-
-
-        mostrar(
-            "informacionRetiro"
-        );
-
-
-        mostrar(
-            "preguntaRetiro"
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error identificando alumno para retiro:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeHuellaRetiro",
-            "Error comunicando con el lector."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// CARGAR LISTA DE RETIRO
-// ============================================================
-//
-// Esta función queda disponible por si el HTML utiliza una
-// lista manual de alumnos para retiro.
-//
-// ============================================================
-
-async function cargarListaRetiro() {
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/alumnos"
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            return;
-
-        }
-
-
-        alumnos =
-            datos.alumnos || [];
-
-
-        const lista =
-            document.getElementById(
-                "listaRetiro"
-            );
-
-
-        if (!lista) {
-
-            return;
-
-        }
-
-
-        lista.innerHTML = "";
-
-
-        alumnos.forEach(
-            function (alumno) {
-
-                if (
-                    alumno.se_retiro === 1
-                ) {
-
-                    return;
-
-                }
-
-
-                const boton =
-                    document.createElement(
-                        "button"
-                    );
-
-
-                boton.className =
-                    "alumno-boton";
-
-
-                boton.innerText =
-                    alumno.numero_lista +
-                    " - " +
-                    alumno.nombre +
-                    " " +
-                    alumno.apellido;
-
-
-                boton.onclick =
-                    function () {
-
-                        seleccionarAlumnoRetiro(
-                            alumno
-                        );
-
-                    };
-
-
-                lista.appendChild(
-                    boton
-                );
-
-            }
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error cargando lista de retiro:",
-            error
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// SELECCIONAR RETIRO
-// ============================================================
-
-function seleccionarAlumnoRetiro(
-    alumno
-) {
-
-    alumnoRetiro =
-        alumno;
-
-
-    cambiarTexto(
-        "numeroRetiro",
-
-        "Nº " +
-        alumno.numero_lista
-    );
-
-
-    cambiarTexto(
-        "nombreRetiro",
-
-        alumno.nombre +
-        " " +
-        alumno.apellido
-    );
-
-
-    cambiarTexto(
-        "compartimentoRetiro",
-
-        alumno.compartimento
-    );
-
-
-    ocultar(
-        "inicioRetiro"
-    );
-
-
-    mostrar(
-        "informacionRetiro"
-    );
-
-
-    mostrar(
-        "esperandoHuellaRetiro"
-    );
-
-
-    cambiarTexto(
-        "mensajeHuellaRetiro",
-        "Coloque la huella del alumno."
-    );
-
-
-    verificarHuellaRetiro();
-
-}
-
-
-// ============================================================
-// VERIFICAR HUELLA PARA RETIRO
-// ============================================================
-//
-// IMPORTANTE:
-// Esta función verifica la huella contra un alumno específico.
-//
-// Python:
-// /api/alumno/<int:alumno_id>/verificar-huella
-//
-// ============================================================
-
-async function verificarHuellaRetiro() {
-
-    if (!alumnoRetiro) {
-
-        return;
-
-    }
-
-
-    try {
-
-        const respuesta =
-            await fetch(
-
-                "/api/alumno/" +
-                alumnoRetiro.id +
-                "/verificar-huella",
-
-                {
-                    method: "POST"
-                }
-
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeHuellaRetiro",
-
-                datos.mensaje ||
-                "La huella no corresponde."
-            );
-
-
-            setTimeout(
-                function () {
-
-                    cambiarTexto(
-                        "mensajeHuellaRetiro",
-                        "Coloque nuevamente la huella del alumno."
-                    );
-
-                    verificarHuellaRetiro();
-
-                },
-                1200
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "esperandoHuellaRetiro"
-        );
-
-
-        mostrar(
-            "preguntaRetiro"
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error verificando huella de retiro:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeHuellaRetiro",
-            "Error comunicando con el lector."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// RETIRAR CON CELULAR
-// ============================================================
-
-async function retirarConCelular() {
-
-    if (!alumnoRetiro) {
-
-        return;
-
-    }
-
-
-    try {
-
-        // ----------------------------------------------------
-        // ABRIR LOCKER
-        // ----------------------------------------------------
-
-        const apertura =
-            await fetch(
-                "/api/locker/abrir",
-                {
-                    method: "POST"
-                }
-            );
-
-
-        const datosApertura =
-            await apertura.json();
-
-
-        if (!datosApertura.ok) {
-
-            alert(
-                datosApertura.mensaje ||
-                "No se pudo abrir el locker."
-            );
-
-
-            return;
-
-        }
-
-
-        // ----------------------------------------------------
-        // REGISTRAR RETIRO
-        // ----------------------------------------------------
-
-        const respuesta =
-            await fetch(
-                "/api/retiro",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoRetiro.id,
-
-                        retiro_celular:
-                            true,
-
-                        compartimento:
-                            alumnoRetiro.compartimento
-
-                    })
-
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            alert(
-                datos.mensaje ||
-                "No se pudo registrar el retiro."
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "preguntaRetiro"
-        );
-
-
-        mostrar(
-            "resultadoRetiro"
-        );
-
-
-        cambiarTexto(
-            "resultadoRetiro",
-
-            "✓ Retiro registrado a las " +
-            datos.hora
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error en retiro con celular:",
-            error
-        );
-
-
-        alert(
-            "Error de comunicación."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// RETIRAR SIN CELULAR
-// ============================================================
-
-async function retirarSinCelular() {
-
-    if (!alumnoRetiro) {
-
-        return;
-
-    }
-
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/retiro",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoRetiro.id,
-
-                        retiro_celular:
-                            false
-
-                    })
-
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            alert(
-                datos.mensaje ||
-                "No se pudo registrar el retiro."
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "preguntaRetiro"
-        );
-
-
-        mostrar(
-            "resultadoRetiro"
-        );
-
-
-        cambiarTexto(
-            "resultadoRetiro",
-
-            "✓ Retiro registrado a las " +
-            datos.hora
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error en retiro sin celular:",
-            error
-        );
-
-
-        alert(
-            "Error de comunicación."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// FINALIZAR HORA
-// ============================================================
-
-async function finalizarHora() {
-
-    const confirmar =
-        confirm(
-            "¿Está seguro de que desea finalizar la hora?"
-        );
-
-
-    if (!confirmar) {
-
-        return;
-
-    }
-
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/finalizar",
-                {
-                    method: "POST"
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (datos.ok) {
-
-            mostrarPantalla(
-                "pantallaLogin"
-            );
-
-
-            cambiarTexto(
-                "mensajeLogin",
-                "Esperando identificación..."
-            );
-
-
-            const boton =
-                document.getElementById(
-                    "botonHuella"
-                );
-
-
-            if (boton) {
-
-                boton.disabled = false;
-
-            }
-
-        } else {
-
-            alert(
-                datos.mensaje ||
-                "No se pudo finalizar la hora."
-            );
-
-        }
-
-
-    } catch (error) {
-
-        console.error(
-            "Error finalizando hora:",
-            error
-        );
-
-
-        alert(
-            "No se pudo finalizar la hora."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// FUNCIONES GENERALES
-// ============================================================
-
-function mostrar(id) {
-
-    const elemento =
-        document.getElementById(id);
-
-
-    if (elemento) {
-
-        elemento.style.display =
-            "block";
-
-    }
-
-}
-
-
-function ocultar(id) {
-
-    const elemento =
-        document.getElementById(id);
-
-
-    if (elemento) {
-
-        elemento.style.display =
-            "none";
-
-    }
-
-}
-
-
-function cambiarTexto(
-    id,
-    texto
-) {
-
-    const elemento =
-        document.getElementById(id);
-
-
-    if (elemento) {
-
-        elemento.innerText =
-            texto;
-
-    }
-
-}
-
-
-function mostrarMensaje(
-    texto
-) {
-
-    const elemento =
-        document.getElementById(
-            "mensajeGeneral"
-        );
-
-
-    if (elemento) {
-
-        elemento.innerText =
-            texto;
-
-    }
-
-}o.id,
-
-                        compartimento:
-                            alumno.compartimento
-
-                    })
-
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeCelular",
-                datos.mensaje ||
-                "No se registró la colocación del celular."
-            );
-
-
-            return;
-
-        }
-
-
-        cambiarTexto(
-            "mensajeCelular",
-            "✓ Celular colocado correctamente."
-        );
-
-
-        mostrarLED();
-
-
-        // ----------------------------------------------------
-        // DESPUÉS DEL CELULAR:
-        // PEDIR HUELLA
-        // ----------------------------------------------------
-
-        setTimeout(
-            function () {
-
-                pedirHuellaAlumno();
-
-            },
-            700
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error colocando celular:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeCelular",
-            "Error de comunicación."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// PEDIR HUELLA DEL ALUMNO
-// ============================================================
-
-function pedirHuellaAlumno() {
-
-    ocultar(
-        "esperandoCelular"
-    );
-
-
-    mostrar(
-        "esperandoHuella"
-    );
-
-
-    cambiarTexto(
-        "mensajeHuella",
-        "✓ Celular registrado. Ahora coloque su huella."
-    );
-
-
-    verificarHuellaAlumno();
-
-}
-
-
-// ============================================================
-// NO TRAJO CELULAR
-// ============================================================
-
-function noTrajoCelular() {
-
-    ocultar(
-        "preguntaCelular"
-    );
-
-
-    mostrar(
-        "esperandoHuella"
-    );
-
-
-    cambiarTexto(
-        "mensajeHuella",
-        "Coloque la huella del alumno."
-    );
-
-
-    registrarHuellaSinCelular();
-
-}
-
-
-// ============================================================
-// VERIFICAR HUELLA DEL ALUMNO ACTUAL
-// ============================================================
-
-async function verificarHuellaAlumno() {
-
-    const alumno =
-        alumnos[alumnoActual];
-
-
-    if (!alumno) {
-
-        return;
-
-    }
-
-
-    try {
-
-        // ----------------------------------------------------
-        // CORREGIDO:
-        // Python tiene:
-        // /api/alumno/<id>/verificar-huella
-        // ----------------------------------------------------
-
-        const respuesta =
-            await fetch(
-
-                "/api/alumno/" +
-                alumno.id +
-                "/verificar-huella",
-
-                {
-                    method: "POST"
-                }
-
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeHuella",
-
-                datos.mensaje ||
-                "La huella no corresponde."
-            );
-
-
-            // No avanzar.
-            setTimeout(
-                function () {
-
-                    cambiarTexto(
-                        "mensajeHuella",
-                        "Vuelva a colocar la huella del alumno."
-                    );
-
-                    verificarHuellaAlumno();
-
-                },
-                1200
-            );
-
-
-            return;
-
-        }
-
-
-        // ----------------------------------------------------
-        // HUELLA CORRECTA
-        // ----------------------------------------------------
-
-        cambiarTexto(
-            "mensajeHuella",
-            "✓ Huella reconocida."
-        );
-
-
-        // ----------------------------------------------------
-        // REGISTRAR ASISTENCIA
-        // ----------------------------------------------------
-
-        const registro =
-            await fetch(
-                "/api/asistencia",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumno.id,
-
-                        estado:
-                            "PRESENTE",
-
-                        trajo_celular:
-                            true
-
-                    })
-
-                }
-            );
-
-
-        const resultado =
-            await registro.json();
-
-
-        if (!resultado.ok) {
-
-            cambiarTexto(
-                "mensajeHuella",
-
-                resultado.mensaje ||
-                "No se pudo registrar la asistencia."
-            );
-
-
-            return;
-
-        }
-
-
-        // ----------------------------------------------------
-        // SIGUIENTE ALUMNO
-        // ----------------------------------------------------
-
-        setTimeout(
-            siguienteAlumno,
-            1000
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error verificando huella:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeHuella",
-            "Error de comunicación con el lector."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// REGISTRAR HUELLA SIN CELULAR
-// ============================================================
-
-async function registrarHuellaSinCelular() {
-
-    const alumno =
-        alumnos[alumnoActual];
-
-
-    if (!alumno) {
-
-        return;
-
-    }
-
-
-    try {
-
-        // ----------------------------------------------------
-        // CORREGIDO:
-        // Verificar alumno específico
-        // ----------------------------------------------------
-
-        const respuesta =
-            await fetch(
-
-                "/api/alumno/" +
-                alumno.id +
-                "/verificar-huella",
-
-                {
-                    method: "POST"
-                }
-
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeHuella",
-
-                datos.mensaje ||
-                "La huella no corresponde."
-            );
-
-
-            setTimeout(
-                function () {
-
-                    cambiarTexto(
-                        "mensajeHuella",
-                        "Vuelva a colocar la huella del alumno."
-                    );
-
-                    registrarHuellaSinCelular();
-
-                },
-                1200
-            );
-
-
-            return;
-
-        }
-
-
-        cambiarTexto(
-            "mensajeHuella",
-            "✓ Huella reconocida."
-        );
-
-
-        // ----------------------------------------------------
-        // REGISTRAR ASISTENCIA SIN CELULAR
-        // ----------------------------------------------------
-
-        const registro =
-            await fetch(
-                "/api/asistencia",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumno.id,
-
-                        estado:
-                            "PRESENTE_SIN_CELULAR",
-
-                        trajo_celular:
-                            false
-
-                    })
-
-                }
-            );
-
-
-        const resultado =
-            await registro.json();
-
-
-        if (!resultado.ok) {
-
-            cambiarTexto(
-                "mensajeHuella",
-
-                resultado.mensaje ||
-                "No se pudo registrar la asistencia."
-            );
-
-
-            return;
-
-        }
-
-
-        setTimeout(
-            siguienteAlumno,
-            1000
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error registrando alumno sin celular:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeHuella",
-            "Error de comunicación con el lector."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// SIGUIENTE ALUMNO
-// ============================================================
-
-function siguienteAlumno() {
-
-    alumnoActual++;
-
-
-    mostrarAlumno();
-
-}
-
-
-// ============================================================
-// FINALIZAR LISTA
-// ============================================================
-
-function finalizarLista() {
-
-    ocultar(
-        "preguntaPresente"
-    );
-
-
-    ocultar(
-        "preguntaCelular"
-    );
-
-
-    ocultar(
-        "esperandoCelular"
-    );
-
-
-    ocultar(
-        "esperandoHuella"
-    );
-
-
-    mostrar(
-        "listaTerminada"
-    );
-
-
-    cambiarTexto(
-        "mensajeFinal",
-        "La toma de lista terminó correctamente."
-    );
-
-}
-
-
-// ============================================================
-// LED VISUAL
-// ============================================================
-
-function mostrarLED() {
-
-    const led =
-        document.getElementById(
-            "ledConfirmacion"
-        );
-
-
-    if (!led) {
-
-        return;
-
-    }
-
-
-    led.classList.add(
-        "led-activo"
-    );
-
-
-    setTimeout(
-        function () {
-
-            led.classList.remove(
-                "led-activo"
-            );
-
-        },
-        3000
-    );
-
-}
-
-
-// ============================================================
-// LLEGADA TARDE
-// ============================================================
-
-async function cargarAusentes() {
-
-    alumnoSeleccionado = null;
-
-
-    ocultar(
-        "alumnoSeleccionado"
-    );
-
-
-    ocultar(
-        "esperandoHuellaLlegada"
-    );
-
-
-    ocultar(
-        "preguntaCelularLlegada"
-    );
-
-
-    ocultar(
-        "esperandoCelularLlegada"
-    );
-
-
-    ocultar(
-        "resultadoLlegada"
-    );
-
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/alumnos/ausentes"
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        const lista =
-            document.getElementById(
-                "listaAusentes"
-            );
-
-
-        if (!lista) {
-
-            return;
-
-        }
-
-
-        lista.innerHTML = "";
-
-
-        if (
-            !datos.ok ||
-            !datos.alumnos ||
-            datos.alumnos.length === 0
-        ) {
-
-            lista.innerHTML =
-                "<h2>No hay alumnos ausentes.</h2>";
-
-
-            return;
-
-        }
-
-
-        const titulo =
-            document.createElement(
-                "h2"
-            );
-
-
-        titulo.innerText =
-            "Seleccione el alumno que llegó:";
-
-
-        lista.appendChild(
-            titulo
-        );
-
-
-        datos.alumnos.forEach(
-            function (alumno) {
-
-                const boton =
-                    document.createElement(
-                        "button"
-                    );
-
-
-                boton.className =
-                    "alumno-boton";
-
-
-                boton.innerText =
-                    alumno.numero_lista +
-                    " - " +
-                    alumno.nombre +
-                    " " +
-                    alumno.apellido;
-
-
-                boton.onclick =
-                    function () {
-
-                        seleccionarAlumnoLlegada(
-                            alumno
-                        );
-
-                    };
-
-
-                lista.appendChild(
-                    boton
-                );
-
-            }
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error cargando ausentes:",
-            error
-        );
-
-
-        mostrarMensaje(
-            "Error cargando ausentes."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// SELECCIONAR ALUMNO LLEGADA
-// ============================================================
-
-function seleccionarAlumnoLlegada(
-    alumno
-) {
-
-    alumnoSeleccionado =
-        alumno;
-
-
-    ocultar(
-        "listaAusentes"
-    );
-
-
-    mostrar(
-        "alumnoSeleccionado"
-    );
-
-
-    cambiarTexto(
-        "numeroSeleccionado",
-        alumno.numero_lista
-    );
-
-
-    cambiarTexto(
-        "nombreSeleccionado",
-        alumno.nombre +
-        " " +
-        alumno.apellido
-    );
-
-
-    mostrar(
-        "esperandoHuellaLlegada"
-    );
-
-
-    cambiarTexto(
-        "mensajeHuellaLlegada",
-        "Coloque la huella del alumno."
-    );
-
-
-    verificarHuellaLlegada();
-
-}
-
-
-// ============================================================
-// VERIFICAR HUELLA LLEGADA
-// ============================================================
-
-async function verificarHuellaLlegada() {
-
-    if (!alumnoSeleccionado) {
-
-        return;
-
-    }
-
-
-    try {
-
-        // ----------------------------------------------------
-        // CORREGIDO
-        // ----------------------------------------------------
-
-        const respuesta =
-            await fetch(
-
-                "/api/alumno/" +
-                alumnoSeleccionado.id +
-                "/verificar-huella",
-
-                {
-                    method: "POST"
-                }
-
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeHuellaLlegada",
-
-                datos.mensaje ||
-                "La huella no corresponde."
-            );
-
-
-            // Volver a pedir huella
-            setTimeout(
-                function () {
-
-                    cambiarTexto(
-                        "mensajeHuellaLlegada",
-                        "Coloque nuevamente la huella del alumno."
-                    );
-
-                    verificarHuellaLlegada();
-
-                },
-                1200
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "esperandoHuellaLlegada"
-        );
-
-
-        mostrar(
-            "preguntaCelularLlegada"
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error verificando huella de llegada:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeHuellaLlegada",
-            "Error de comunicación."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// LLEGADA CON CELULAR
-// ============================================================
-
-async function llegadaConCelular() {
-
-    if (!alumnoSeleccionado) {
-
-        return;
-
-    }
-
-
-    ocultar(
-        "preguntaCelularLlegada"
-    );
-
-
-    mostrar(
-        "esperandoCelularLlegada"
-    );
-
-
-    cambiarTexto(
-        "numeroCompartimentoLlegada",
-        alumnoSeleccionado.compartimento
-    );
-
-
-    cambiarTexto(
-        "mensajeCelularLlegada",
-        "Abriendo locker..."
-    );
-
-
-    try {
-
-        // ----------------------------------------------------
-        // ABRIR LOCKER
-        // ----------------------------------------------------
-
-        const apertura =
-            await fetch(
-                "/api/locker/abrir",
-                {
-                    method: "POST"
-                }
-            );
-
-
-        const datosApertura =
-            await apertura.json();
-
-
-        if (!datosApertura.ok) {
-
-            cambiarTexto(
-                "mensajeCelularLlegada",
-
-                datosApertura.mensaje ||
-                "No se pudo abrir el locker."
-            );
-
-
-            return;
-
-        }
-
-
-        cambiarTexto(
-            "mensajeCelularLlegada",
-            "Coloque el celular y presione el botón."
-        );
-
-
-        // ----------------------------------------------------
-        // ESPERAR BOTÓN
-        // ----------------------------------------------------
-
-        const respuesta =
-            await fetch(
-                "/api/celular/esperar-boton",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoSeleccionado.id,
-
-                        compartimento:
-                            alumnoSeleccionado.compartimento
-
-                    })
-
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeCelularLlegada",
-
-                datos.mensaje ||
-                "No se registró la colocación del celular."
-            );
-
-
-            return;
-
-        }
-
-
-        await registrarLlegada(
-            true
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error en llegada con celular:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeCelularLlegada",
-            "Error de comunicación."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// LLEGADA SIN CELULAR
-// ============================================================
-
-async function llegadaSinCelular() {
-
-    await registrarLlegada(
-        false
-    );
-
-}
-
-
-// ============================================================
-// REGISTRAR LLEGADA
-// ============================================================
-
-async function registrarLlegada(
-    trajoCelular
-) {
-
-    if (!alumnoSeleccionado) {
-
-        return;
-
-    }
-
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/llegada",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoSeleccionado.id,
-
-                        trajo_celular:
-                            trajoCelular
-
-                    })
-
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            mostrarMensaje(
-                datos.mensaje ||
-                "No se pudo registrar la llegada."
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "preguntaCelularLlegada"
-        );
-
-
-        ocultar(
-            "esperandoCelularLlegada"
-        );
-
-
-        mostrar(
-            "resultadoLlegada"
-        );
-
-
-        cambiarTexto(
-            "resultadoLlegada",
-
-            "✓ Llegada registrada a las " +
-            datos.hora
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error registrando llegada:",
-            error
-        );
-
-
-        mostrarMensaje(
-            "Error de comunicación."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// RETIRO
-// ============================================================
-
-function prepararRetiro() {
-
-    alumnoRetiro = null;
-
-
-    ocultar(
-        "esperandoHuellaRetiro"
-    );
-
-
-    ocultar(
-        "informacionRetiro"
-    );
-
-
-    ocultar(
-        "preguntaRetiro"
-    );
-
-
-    ocultar(
-        "resultadoRetiro"
-    );
-
-
-    mostrar(
-        "inicioRetiro"
-    );
-
-}
-
-
-// ============================================================
-// INICIAR RETIRO
-// ============================================================
-
-function iniciarRetiro() {
-
-    ocultar(
-        "inicioRetiro"
-    );
-
-
-    mostrar(
-        "esperandoHuellaRetiro"
-    );
-
-
-    cambiarTexto(
-        "mensajeHuellaRetiro",
-        "Coloque la huella del alumno."
-    );
-
-
-    identificarAlumnoRetiro();
-
-}
-
-
-// ============================================================
-// IDENTIFICAR ALUMNO PARA RETIRO
-// ============================================================
-//
-// Acá NO conocemos todavía al alumno.
-// Por eso usamos la función Python:
-// fingerprint_manager.identificar_alumno()
-// mediante /api/alumno/esperar-huella
-//
-// ============================================================
-
-async function identificarAlumnoRetiro() {
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/alumno/esperar-huella",
-                {
-                    method: "POST"
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeHuellaRetiro",
-
-                datos.mensaje ||
-                "No se pudo identificar al alumno."
-            );
-
-
-            return;
-
-        }
-
-
-        // ----------------------------------------------------
-        // Guardamos los datos recibidos
-        // ----------------------------------------------------
-
-        alumnoRetiro = {
-
-            id:
-                datos.alumno_id,
-
-            alumno_id:
-                datos.alumno_id,
-
-            numero_lista:
-                datos.numero_lista,
-
-            nombre:
-                datos.nombre,
-
-            apellido:
-                datos.apellido,
-
-            compartimento:
-                datos.compartimento,
-
-            usuario_huella:
-                datos.usuario_huella
-
-        };
-
-
-        cambiarTexto(
-            "numeroRetiro",
-            datos.numero_lista
-        );
-
-
-        cambiarTexto(
-            "nombreRetiro",
-
-            datos.nombre +
-            " " +
-            datos.apellido
-        );
-
-
-        cambiarTexto(
-            "compartimentoRetiro",
-            datos.compartimento
-        );
-
-
-        ocultar(
-            "esperandoHuellaRetiro"
-        );
-
-
-        mostrar(
-            "informacionRetiro"
-        );
-
-
-        mostrar(
-            "preguntaRetiro"
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error identificando alumno para retiro:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeHuellaRetiro",
-            "Error comunicando con el lector."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// CARGAR LISTA DE RETIRO
-// ============================================================
-//
-// Esta función queda disponible por si el HTML utiliza una
-// lista manual de alumnos para retiro.
-//
-// ============================================================
-
-async function cargarListaRetiro() {
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/alumnos"
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            return;
-
-        }
-
-
-        alumnos =
-            datos.alumnos || [];
-
-
-        const lista =
-            document.getElementById(
-                "listaRetiro"
-            );
-
-
-        if (!lista) {
-
-            return;
-
-        }
-
-
-        lista.innerHTML = "";
-
-
-        alumnos.forEach(
-            function (alumno) {
-
-                if (
-                    alumno.se_retiro === 1
-                ) {
-
-                    return;
-
-                }
-
-
-                const boton =
-                    document.createElement(
-                        "button"
-                    );
-
-
-                boton.className =
-                    "alumno-boton";
-
-
-                boton.innerText =
-                    alumno.numero_lista +
-                    " - " +
-                    alumno.nombre +
-                    " " +
-                    alumno.apellido;
-
-
-                boton.onclick =
-                    function () {
-
-                        seleccionarAlumnoRetiro(
-                            alumno
-                        );
-
-                    };
-
-
-                lista.appendChild(
-                    boton
-                );
-
-            }
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error cargando lista de retiro:",
-            error
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// SELECCIONAR RETIRO
-// ============================================================
-
-function seleccionarAlumnoRetiro(
-    alumno
-) {
-
-    alumnoRetiro =
-        alumno;
-
-
-    cambiarTexto(
-        "numeroRetiro",
-
-        "Nº " +
-        alumno.numero_lista
-    );
-
-
-    cambiarTexto(
-        "nombreRetiro",
-
-        alumno.nombre +
-        " " +
-        alumno.apellido
-    );
-
-
-    cambiarTexto(
-        "compartimentoRetiro",
-
-        alumno.compartimento
-    );
-
-
-    ocultar(
-        "inicioRetiro"
-    );
-
-
-    mostrar(
-        "informacionRetiro"
-    );
-
-
-    mostrar(
-        "esperandoHuellaRetiro"
-    );
-
-
-    cambiarTexto(
-        "mensajeHuellaRetiro",
-        "Coloque la huella del alumno."
-    );
-
-
-    verificarHuellaRetiro();
-
-}
-
-
-// ============================================================
-// VERIFICAR HUELLA PARA RETIRO
-// ============================================================
-//
-// IMPORTANTE:
-// Esta función verifica la huella contra un alumno específico.
-//
-// Python:
-// /api/alumno/<int:alumno_id>/verificar-huella
-//
-// ============================================================
-
-async function verificarHuellaRetiro() {
-
-    if (!alumnoRetiro) {
-
-        return;
-
-    }
-
-
-    try {
-
-        const respuesta =
-            await fetch(
-
-                "/api/alumno/" +
-                alumnoRetiro.id +
-                "/verificar-huella",
-
-                {
-                    method: "POST"
-                }
-
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeHuellaRetiro",
-
-                datos.mensaje ||
-                "La huella no corresponde."
-            );
-
-
-            setTimeout(
-                function () {
-
-                    cambiarTexto(
-                        "mensajeHuellaRetiro",
-                        "Coloque nuevamente la huella del alumno."
-                    );
-
-                    verificarHuellaRetiro();
-
-                },
-                1200
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "esperandoHuellaRetiro"
-        );
-
-
-        mostrar(
-            "preguntaRetiro"
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error verificando huella de retiro:",
-            error
-        );
-
-
-        cambiarTexto(
-            "mensajeHuellaRetiro",
-            "Error comunicando con el lector."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// RETIRAR CON CELULAR
-// ============================================================
-
-async function retirarConCelular() {
-
-    if (!alumnoRetiro) {
-
-        return;
-
-    }
-
-
-    try {
-
-        // ----------------------------------------------------
-        // ABRIR LOCKER
-        // ----------------------------------------------------
-
-        const apertura =
-            await fetch(
-                "/api/locker/abrir",
-                {
-                    method: "POST"
-                }
-            );
-
-
-        const datosApertura =
-            await apertura.json();
-
-
-        if (!datosApertura.ok) {
-
-            alert(
-                datosApertura.mensaje ||
-                "No se pudo abrir el locker."
-            );
-
-
-            return;
-
-        }
-
-
-        // ----------------------------------------------------
-        // REGISTRAR RETIRO
-        // ----------------------------------------------------
-
-        const respuesta =
-            await fetch(
-                "/api/retiro",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoRetiro.id,
-
-                        retiro_celular:
-                            true,
-
-                        compartimento:
-                            alumnoRetiro.compartimento
-
-                    })
-
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            alert(
-                datos.mensaje ||
-                "No se pudo registrar el retiro."
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "preguntaRetiro"
-        );
-
-
-        mostrar(
-            "resultadoRetiro"
-        );
-
-
-        cambiarTexto(
-            "resultadoRetiro",
-
-            "✓ Retiro registrado a las " +
-            datos.hora
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error en retiro con celular:",
-            error
-        );
-
-
-        alert(
-            "Error de comunicación."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// RETIRAR SIN CELULAR
-// ============================================================
-
-async function retirarSinCelular() {
-
-    if (!alumnoRetiro) {
-
-        return;
-
-    }
-
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/retiro",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoRetiro.id,
-
-                        retiro_celular:
-                            false
-
-                    })
-
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            alert(
-                datos.mensaje ||
-                "No se pudo registrar el retiro."
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "preguntaRetiro"
-        );
-
-
-        mostrar(
-            "resultadoRetiro"
-        );
-
-
-        cambiarTexto(
-            "resultadoRetiro",
-
-            "✓ Retiro registrado a las " +
-            datos.hora
-        );
-
-
-    } catch (error) {
-
-        console.error(
-            "Error en retiro sin celular:",
-            error
-        );
-
-
-        alert(
-            "Error de comunicación."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// FINALIZAR HORA
-// ============================================================
-
-async function finalizarHora() {
-
-    const confirmar =
-        confirm(
-            "¿Está seguro de que desea finalizar la hora?"
-        );
-
-
-    if (!confirmar) {
-
-        return;
-
-    }
-
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/finalizar",
-                {
-                    method: "POST"
-                }
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (datos.ok) {
-
-            mostrarPantalla(
-                "pantallaLogin"
-            );
-
-
-            cambiarTexto(
-                "mensajeLogin",
-                "Esperando identificación..."
-            );
-
-
-            const boton =
-                document.getElementById(
-                    "botonHuella"
-                );
-
-
-            if (boton) {
-
-                boton.disabled = false;
-
-            }
-
-        } else {
-
-            alert(
-                datos.mensaje ||
-                "No se pudo finalizar la hora."
-            );
-
-        }
-
-
-    } catch (error) {
-
-        console.error(
-            "Error finalizando hora:",
-            error
-        );
-
-
-        alert(
-            "No se pudo finalizar la hora."
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// FUNCIONES GENERALES
-// ============================================================
-
-function mostrar(id) {
-
-    const elemento =
-        document.getElementById(id);
-
-
-    if (elemento) {
-
-        elemento.style.display =
-            "block";
-
-    }
-
-}
-
-
-function ocultar(id) {
-
-    const elemento =
-        document.getElementById(id);
-
-
-    if (elemento) {
-
-        elemento.style.display =
-            "none";
-
-    }
-
-}
-
-
-function cambiarTexto(
-    id,
-    texto
-) {
-
-    const elemento =
-        document.getElementById(id);
-
-
-    if (elemento) {
-
-        elemento.innerText =
-            texto;
-
-    }
-
-}
-
-
-function mostrarMensaje(
-    texto
-) {
-
-    const elemento =
-        document.getElementById(
-            "mensajeGeneral"
-        );
-
-
-    if (elemento) {
-
-        elemento.innerText =
-            texto;
-
-    }
-
-};
-
-
-            // No avanzar.
-
-            setTimeout(
-
-                function () {
-
-                    cambiarTexto(
-
-                        "mensajeHuella",
-
-                        "Vuelva a colocar la huella del alumno."
-
-                    );
-
-                    verificarHuellaAlumno();
-
-                },
-
-                1200
-
-            );
-
-
-            return;
-
-        }
-
-
-        // ----------------------------------------------------
-        // HUella correcta
-        // ----------------------------------------------------
-
-        cambiarTexto(
-
-            "mensajeHuella",
-
-            "✓ Huella reconocida."
-
-        );
-
-
-        // ----------------------------------------------------
-        // Registrar asistencia
-        // ----------------------------------------------------
-
-        const registro =
-            await fetch(
-
-                "/api/asistencia",
-
-                {
-
-                    method: "POST",
-
-                    headers: {
-
-                        "Content-Type":
-                            "application/json"
-
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumno.id,
-
-                        estado:
-                            "PRESENTE",
-
-                        trajo_celular:
-                            true
-
-                    })
-
-                }
-
-            );
-
-
-        const resultado =
-            await registro.json();
-
-
-        if (!resultado.ok) {
-
-            cambiarTexto(
-
-                "mensajeHuella",
-
-                resultado.mensaje
-
-            );
-
-
-            return;
-
-        }
-
-
-        // ----------------------------------------------------
-        // Siguiente
-        // ----------------------------------------------------
-
-        setTimeout(
-
-            siguienteAlumno,
-
-            1000
-
-        );
-
-
-    } catch (error) {
-
-        console.error(error);
-
-
-        cambiarTexto(
-
-            "mensajeHuella",
-
-            "Error de comunicación con el lector."
-
+        // Se mantiene abierta la operacion hasta que la huella
+        // del alumno haya sido verificada correctamente.
+        await verificarHuellaAlumnoInterno(
+            alumno.id
         );
-
-    }
-
-}
-
-
-// ============================================================
-// CASO SIN CELULAR
-// ============================================================
-//
-// Reemplazamos el valor trajo_celular=true por false
-// cuando el alumno no trae celular.
-//
-// ============================================================
-
-// Para que la función anterior sea correcta en ambos casos,
-// usamos esta versión especial.
-
-async function registrarHuellaSinCelular() {
-
-    const alumno =
-        alumnos[alumnoActual];
-
-
-    if (!alumno) {
-
-        return;
-
-    }
-
-
-    try {
-
-        const respuesta =
-            await fetch(
 
+        await postJSON(
             "/api/alumno/" +
             alumno.id +
-            "/verificar-huella",
-
+            "/celular",
             {
-                method: "POST"
+                trajo: true
             }
-
         );
 
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-
-                "mensajeHuella",
-
-                "La huella no corresponde."
-
-            );
-
-
-            return;
-
-        }
-
-
-        const registro =
-            await fetch(
-
-                "/api/asistencia",
-
-                {
-
-                    method: "POST",
-
-                    headers: {
-
-                        "Content-Type":
-                            "application/json"
-
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumno.id,
-
-                        estado:
-                            "PRESENTE_SIN_CELULAR",
-
-                        trajo_celular:
-                            false
-
-                    })
-
-                }
-
-            );
-
-
-        const resultado =
-            await registro.json();
-
-
-        if (!resultado.ok) {
-
-            cambiarTexto(
-
-                "mensajeHuella",
-
-                resultado.mensaje
-
-            );
-
-
-            return;
-
-        }
-
+        await postJSON(
+            "/api/asistencia",
+            {
+                alumno_id: alumno.id,
+                estado: "PRESENTE_CON_CELULAR",
+                trajo_celular: true
+            }
+        );
 
         siguienteAlumno();
 
-
     } catch (error) {
+        console.error("Error guardando celular:", error);
 
-        console.error(error);
+        cambiarTexto(
+            "mensajeCelular",
+            error.message
+        );
 
+        cambiarTexto(
+            "mensajeHuella",
+            error.message
+        );
+
+    } finally {
+        operacionEnCurso = false;
     }
-
 }
 
 
 // ============================================================
-// CORREGIR NO CELULAR
-// ============================================================
-//
-// Redefinimos la función para usar la función correcta.
+// ASISTENCIA - SIN CELULAR
 // ============================================================
 
-function noTrajoCelular() {
+async function noTrajoCelular() {
+    if (operacionEnCurso) {
+        return;
+    }
 
-    ocultar(
-        "preguntaCelular"
-    );
+    const alumno = alumnos[alumnoActual];
 
+    if (!alumno) {
+        return;
+    }
 
-    mostrar(
-        "esperandoHuella"
-    );
+    operacionEnCurso = true;
 
+    ocultar("preguntaCelular");
+    mostrar("esperandoHuella");
 
     cambiarTexto(
-
         "mensajeHuella",
-
-        "Coloque la huella del alumno."
-
+        "Coloque la huella del alumno para confirmar su asistencia."
     );
 
+    try {
+        await verificarHuellaAlumnoInterno(
+            alumno.id
+        );
 
-    registrarHuellaSinCelular();
+        await postJSON(
+            "/api/alumno/" +
+            alumno.id +
+            "/celular",
+            {
+                trajo: false
+            }
+        );
 
+        await postJSON(
+            "/api/asistencia",
+            {
+                alumno_id: alumno.id,
+                estado: "PRESENTE_SIN_CELULAR",
+                trajo_celular: false
+            }
+        );
+
+        cambiarTexto(
+            "mensajeHuella",
+            "✓ Asistencia confirmada. No trajo celular."
+        );
+
+        setTimeout(
+            siguienteAlumno,
+            700
+        );
+
+    } catch (error) {
+        console.error("Error verificando alumno:", error);
+
+        cambiarTexto(
+            "mensajeHuella",
+            error.message
+        );
+
+    } finally {
+        operacionEnCurso = false;
+    }
+}
+
+// ============================================================
+// VERIFICAR HUELLA DE ALUMNO
+// ============================================================
+
+async function verificarHuellaAlumnoInterno(
+    alumnoId
+) {
+    const datos = await postJSON(
+        "/api/alumno/" +
+        alumnoId +
+        "/verificar-huella"
+    );
+
+    if (!datos.ok) {
+        throw new Error(
+            datos.mensaje ||
+            "La huella no corresponde al alumno seleccionado."
+        );
+    }
+
+    cambiarTexto(
+        "mensajeHuella",
+        "✓ Huella reconocida."
+    );
+
+    return datos;
+}
+
+
+// ============================================================
+// FUNCIONES AUXILIARES DE HUELLA
+// ============================================================
+
+async function verificarHuellaAlumno(
+    conCelular = false
+) {
+    const alumno = alumnos[alumnoActual];
+
+    if (!alumno) {
+        return;
+    }
+
+    try {
+        await verificarHuellaAlumnoInterno(
+            alumno.id
+        );
+
+        await postJSON(
+            "/api/asistencia",
+            {
+                alumno_id: alumno.id,
+                estado: conCelular
+                    ? "PRESENTE_CON_CELULAR"
+                    : "PRESENTE_SIN_CELULAR",
+                trajo_celular: conCelular
+            }
+        );
+
+        siguienteAlumno();
+
+    } catch (error) {
+        console.error(
+            "Error verificando huella:",
+            error
+        );
+
+        cambiarTexto(
+            "mensajeHuella",
+            error.message
+        );
+    }
+}
+
+async function registrarHuellaSinCelular() {
+    const alumno = alumnos[alumnoActual];
+
+    if (!alumno) {
+        return;
+    }
+
+    try {
+        await verificarHuellaAlumnoInterno(
+            alumno.id
+        );
+
+        await postJSON(
+            "/api/alumno/" +
+            alumno.id +
+            "/celular",
+            {
+                trajo: false
+            }
+        );
+
+        await postJSON(
+            "/api/asistencia",
+            {
+                alumno_id: alumno.id,
+                estado: "PRESENTE_SIN_CELULAR",
+                trajo_celular: false
+            }
+        );
+
+        siguienteAlumno();
+
+    } catch (error) {
+        console.error(
+            "Error registrando huella:",
+            error
+        );
+
+        cambiarTexto(
+            "mensajeHuella",
+            error.message
+        );
+    }
+}
+
+function pedirHuellaAlumno() {
+    ocultar("esperandoCelular");
+    mostrar("esperandoHuella");
+
+    cambiarTexto(
+        "mensajeHuella",
+        "Coloque la huella del alumno."
+    );
+
+    verificarHuellaAlumno();
 }
 
 
@@ -4714,12 +604,8 @@ function noTrajoCelular() {
 // ============================================================
 
 function siguienteAlumno() {
-
-    alumnoActual++;
-
-
+    alumnoActual += 1;
     mostrarAlumno();
-
 }
 
 
@@ -4728,81 +614,46 @@ function siguienteAlumno() {
 // ============================================================
 
 function finalizarLista() {
+    ocultar("preguntaPresente");
+    ocultar("preguntaCelular");
+    ocultar("esperandoCelular");
+    ocultar("esperandoHuella");
 
-    ocultar(
-        "preguntaPresente"
-    );
-
-
-    ocultar(
-        "preguntaCelular"
-    );
-
-
-    ocultar(
-        "esperandoCelular"
-    );
-
-
-    ocultar(
-        "esperandoHuella"
-    );
-
-
-    mostrar(
-        "listaTerminada"
-    );
-
+    mostrar("listaTerminada");
 
     cambiarTexto(
-
         "mensajeFinal",
-
-        "La toma de lista terminó correctamente."
-
+        "La toma de lista termino correctamente."
     );
-
 }
 
 
 // ============================================================
-// LED VISUAL
+// LED
 // ============================================================
 
-function mostrarLED() {
-
+function mostrarLED(
+    id = "ledConfirmacion"
+) {
     const led =
-        document.getElementById(
-            "ledConfirmacion"
-        );
-
+        document.getElementById(id);
 
     if (!led) {
-
         return;
-
     }
-
 
     led.classList.add(
         "led-activo"
     );
 
-
     setTimeout(
-
-        function () {
-
+        () => {
             led.classList.remove(
                 "led-activo"
             );
-
         },
-
-        3000
-
+        2500
     );
-
 }
 
 
@@ -4811,89 +662,92 @@ function mostrarLED() {
 // ============================================================
 
 async function cargarAusentes() {
-
     alumnoSeleccionado = null;
-
 
     ocultar(
         "alumnoSeleccionado"
     );
 
-
     ocultar(
         "esperandoHuellaLlegada"
     );
-
 
     ocultar(
         "preguntaCelularLlegada"
     );
 
-
     ocultar(
         "esperandoCelularLlegada"
     );
-
 
     ocultar(
         "resultadoLlegada"
     );
 
+    const contenedor =
+        document.getElementById(
+            "listaAusentes"
+        );
+
+    if (!contenedor) {
+        return;
+    }
+
+    contenedor.innerHTML =
+        "<h2>Cargando alumnos...</h2>";
 
     try {
-
-        const respuesta =
-            await fetch(
-
-                "/api/alumnos/ausentes"
-
-            );
-
+        // ----------------------------------------------------
+        // app.py devuelve todos los alumnos.
+        // Filtramos los que estan ausentes.
+        // ----------------------------------------------------
 
         const datos =
-            await respuesta.json();
-
-
-        const lista =
-            document.getElementById(
-                "listaAusentes"
+            await jsonFetch(
+                "/api/alumnos"
             );
 
+        const lista =
+            (datos.alumnos || [])
+                .filter(
+                    function (alumno) {
 
-        lista.innerHTML = "";
+                        return (
+                            Number(
+                                alumno.presente
+                            ) === 0 &&
 
+                            Number(
+                                alumno.se_retiro
+                            ) !== 1
+                        );
 
-        if (
-            !datos.ok ||
-            datos.alumnos.length === 0
-        ) {
+                    }
+                );
 
-            lista.innerHTML =
+        contenedor.innerHTML = "";
+
+        if (lista.length === 0) {
+
+            contenedor.innerHTML =
                 "<h2>No hay alumnos ausentes.</h2>";
 
-
             return;
-
         }
-
 
         const titulo =
             document.createElement(
                 "h2"
             );
 
+        titulo.textContent =
+            "Seleccione el alumno que llego tarde:";
 
-        titulo.innerText =
-            "Seleccione el alumno que llegó:";
-
-
-        lista.appendChild(
+        contenedor.appendChild(
             titulo
         );
 
-
-        datos.alumnos.forEach(
-
+        lista.forEach(
             function (alumno) {
 
                 const boton =
@@ -4901,1110 +755,1528 @@ async function cargarAusentes() {
                         "button"
                     );
 
-
                 boton.className =
                     "alumno-boton";
 
+                boton.type =
+                    "button";
 
-                boton.innerText =
+                boton.textContent =
                     alumno.numero_lista +
                     " - " +
-                    alumno.nombre +
-                    " " +
-                    alumno.apellido;
+                    nombreCompleto(
+                        alumno
+                    );
 
-
-                boton.onclick =
+                boton.addEventListener(
+                    "click",
                     function () {
 
                         seleccionarAlumnoLlegada(
                             alumno
                         );
 
-                    };
-
-
-                lista.appendChild(
-                    boton
+                    }
                 );
 
+                contenedor.appendChild(
+                    boton
+                );
             }
-
         );
-
 
     } catch (error) {
 
-        console.error(error);
-
-        mostrarMensaje(
-            "Error cargando ausentes."
+        console.error(
+            "Error cargando alumnos ausentes:",
+            error
         );
 
+        contenedor.innerHTML =
+            `<div class="error">${error.message}</div>`;
     }
-
 }
 
 
 // ============================================================
-// SELECCIONAR ALUMNO LLEGADA
+// SELECCIONAR ALUMNO - LLEGADA
 // ============================================================
 
 function seleccionarAlumnoLlegada(
     alumno
 ) {
-
     alumnoSeleccionado =
         alumno;
-
-
-    ocultar(
-        "listaAusentes"
-    );
-
 
     mostrar(
         "alumnoSeleccionado"
     );
 
-
     cambiarTexto(
-
         "numeroSeleccionado",
-
         alumno.numero_lista
-
     );
 
-
     cambiarTexto(
-
         "nombreSeleccionado",
-
-        alumno.nombre +
-        " " +
-        alumno.apellido
-
+        nombreCompleto(
+            alumno
+        )
     );
 
-
-    mostrar(
-        "esperandoHuellaLlegada"
+    ocultar(
+        "listaAusentes"
     );
-
-
-    cambiarTexto(
-
-        "mensajeHuellaLlegada",
-
-        "Coloque la huella del alumno."
-
-    );
-
-
-    verificarHuellaLlegada();
-
-}
-
-
-// ============================================================
-// VERIFICAR HUELLA LLEGADA
-// ============================================================
-
-async function verificarHuellaLlegada() {
-
-    if (!alumnoSeleccionado) {
-
-        return;
-
-    }
-
-
-    try {
-
-        const respuesta =
-            await fetch(
-
-                "/api/alumno/" +
-                alumnoSeleccionado.id +
-                "/huella",
-
-                {
-                    method: "POST"
-                }
-
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-
-                "mensajeHuellaLlegada",
-
-                datos.mensaje ||
-                "La huella no corresponde."
-
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "esperandoHuellaLlegada"
-        );
-
-
-        mostrar(
-            "preguntaCelularLlegada"
-        );
-
-
-    } catch (error) {
-
-        console.error(error);
-
-
-        cambiarTexto(
-
-            "mensajeHuellaLlegada",
-
-            "Error de comunicación."
-
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// LLEGADA CON CELULAR
-// ============================================================
-
-async function llegadaConCelular() {
-
-    if (!alumnoSeleccionado) {
-
-        return;
-
-    }
-
 
     ocultar(
         "preguntaCelularLlegada"
     );
 
-
-    mostrar(
+    ocultar(
         "esperandoCelularLlegada"
     );
 
-
-    cambiarTexto(
-
-        "numeroCompartimentoLlegada",
-
-        alumnoSeleccionado.compartimento
-
+    ocultar(
+        "resultadoLlegada"
     );
 
-
-    cambiarTexto(
-
-        "mensajeCelularLlegada",
-
-        "Abriendo locker..."
-
+    mostrar(
+        "esperandoHuellaLlegada"
     );
 
+    cambiarTexto(
+        "mensajeHuellaLlegada",
+        "Coloque la huella del alumno."
+    );
+
+    verificarHuellaLlegada();
+}
+
+
+// ============================================================
+// VERIFICAR HUELLA - LLEGADA
+// ============================================================
+
+async function verificarHuellaLlegada() {
+    if (!alumnoSeleccionado) {
+        return;
+    }
 
     try {
 
-        const apertura =
-            await fetch(
-
-                "/api/locker/abrir",
-
-                {
-                    method: "POST"
-                }
-
-            );
-
-
-        const datosApertura =
-            await apertura.json();
-
-
-        if (!datosApertura.ok) {
-
-            cambiarTexto(
-
-                "mensajeCelularLlegada",
-
-                "No se pudo abrir el locker."
-
-            );
-
-
-            return;
-
-        }
-
+        await postJSON(
+            "/api/alumno/" +
+            alumnoSeleccionado.id +
+            "/verificar-huella"
+        );
 
         cambiarTexto(
-
-            "mensajeCelularLlegada",
-
-            "Coloque el celular y presione el botón."
-
+            "mensajeHuellaLlegada",
+            "✓ Huella reconocida."
         );
 
-
-        const respuesta =
-            await fetch(
-
-                "/api/celular/esperar-boton",
-
-                {
-
-                    method: "POST",
-
-                    headers: {
-
-                        "Content-Type":
-                            "application/json"
-
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoSeleccionado.id,
-
-                        compartimento:
-                            alumnoSeleccionado.compartimento
-
-                    })
-
-                }
-
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-
-                "mensajeCelularLlegada",
-
-                datos.mensaje
-
-            );
-
-
-            return;
-
-        }
-
-
-        await registrarLlegada(
-            true
+        ocultar(
+            "esperandoHuellaLlegada"
         );
 
+        mostrar(
+            "preguntaCelularLlegada"
+        );
 
     } catch (error) {
 
-        console.error(error);
-
-
-        cambiarTexto(
-
-            "mensajeCelularLlegada",
-
-            "Error de comunicación."
-
+        console.error(
+            "Error verificando huella de llegada:",
+            error
         );
 
-    }
+        cambiarTexto(
+            "mensajeHuellaLlegada",
+            error.message
+        );
 
+        // Se vuelve a intentar la lectura.
+        setTimeout(
+            verificarHuellaLlegada,
+            1200
+        );
+    }
 }
 
 
 // ============================================================
-// LLEGADA SIN CELULAR
+// LLEGADA TARDE - CON CELULAR
 // ============================================================
 
-function llegadaSinCelular() {
+async function llegadaConCelular() {
+    if (!alumnoSeleccionado || operacionEnCurso) {
+        return;
+    }
 
-    registrarLlegada(
-        false
+    operacionEnCurso = true;
+
+    ocultar("preguntaCelularLlegada");
+    mostrar("esperandoCelularLlegada");
+
+    cambiarTexto(
+        "numeroCompartimentoLlegada",
+        alumnoSeleccionado.compartimento
     );
 
+    cambiarTexto(
+        "mensajeCelularLlegada",
+        "Abriendo locker..."
+    );
+
+    try {
+        await postJSON(
+            "/api/locker/abrir"
+        );
+
+        cambiarTexto(
+            "mensajeCelularLlegada",
+            `Coloque el celular en el compartimento ${alumnoSeleccionado.compartimento} y presione el boton.`
+        );
+
+        await postJSON(
+            "/api/celular/esperar-boton",
+            {
+                alumno_id:
+                    alumnoSeleccionado.id,
+
+                compartimento:
+                    alumnoSeleccionado.compartimento
+            }
+        );
+
+        await postJSON(
+            "/api/alumno/" +
+            alumnoSeleccionado.id +
+            "/celular",
+            {
+                trajo: true
+            }
+        );
+
+        const datos =
+            await postJSON(
+                "/api/llegada",
+                {
+                    alumno_id:
+                        alumnoSeleccionado.id,
+
+                    trajo_celular:
+                        true
+                }
+            );
+
+        mostrarLED(
+            "ledConfirmacionLlegada"
+        );
+
+        mostrarResultadoLlegada(
+            "✓ Llegada tarde registrada a las " +
+            (datos.hora || "hora actual") +
+            "."
+        );
+
+        // Esperar un momento y volver a mostrar
+        // los alumnos que todavía están ausentes.
+        setTimeout(
+            function () {
+                actualizarListaAusentes();
+            },
+            1200
+        );
+
+    } catch (error) {
+        console.error(
+            "Error registrando llegada con celular:",
+            error
+        );
+
+        cambiarTexto(
+            "mensajeCelularLlegada",
+            error.message
+        );
+
+    } finally {
+        operacionEnCurso = false;
+    }
 }
 
 
 // ============================================================
-// REGISTRAR LLEGADA
+// LLEGADA TARDE - SIN CELULAR
 // ============================================================
 
-async function registrarLlegada(
-    trajoCelular
-) {
-
-    if (!alumnoSeleccionado) {
-
+async function llegadaSinCelular() {
+    if (!alumnoSeleccionado || operacionEnCurso) {
         return;
-
     }
 
+    operacionEnCurso = true;
 
     try {
-
-        const respuesta =
-            await fetch(
-
-                "/api/llegada",
-
-                {
-
-                    method: "POST",
-
-                    headers: {
-
-                        "Content-Type":
-                            "application/json"
-
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoSeleccionado.id,
-
-                        trajo_celular:
-                            trajoCelular
-
-                    })
-
-                }
-
-            );
-
+        await postJSON(
+            "/api/alumno/" +
+            alumnoSeleccionado.id +
+            "/celular",
+            {
+                trajo: false
+            }
+        );
 
         const datos =
-            await respuesta.json();
+            await postJSON(
+                "/api/llegada",
+                {
+                    alumno_id:
+                        alumnoSeleccionado.id,
 
-
-        if (!datos.ok) {
-
-            mostrarMensaje(
-                datos.mensaje
+                    trajo_celular:
+                        false
+                }
             );
-
-
-            return;
-
-        }
-
 
         ocultar(
             "preguntaCelularLlegada"
         );
 
-
-        ocultar(
-            "esperandoCelularLlegada"
+        mostrarResultadoLlegada(
+            "✓ Llegada tarde registrada a las " +
+            (datos.hora || "hora actual") +
+            ". El alumno no trajo celular."
         );
 
-
-        mostrar(
-            "resultadoLlegada"
+        // Volver a mostrar la lista actualizada
+        // para poder registrar otro alumno.
+        setTimeout(
+            function () {
+                actualizarListaAusentes();
+            },
+            1200
         );
-
-
-        cambiarTexto(
-
-            "resultadoLlegada",
-
-            "✓ Llegada registrada a las " +
-            datos.hora
-
-        );
-
 
     } catch (error) {
+        console.error(
+            "Error registrando llegada sin celular:",
+            error
+        );
 
-        console.error(error);
+        mostrarMensaje(
+            error.message
+        );
 
+    } finally {
+        operacionEnCurso = false;
     }
-
 }
-
-
-// ============================================================
-// RETIRO
-// ============================================================
-
-function prepararRetiro() {
-
-    alumnoRetiro = null;
-
-
-    ocultar(
-        "esperandoHuellaRetiro"
-    );
-
-
-    ocultar(
-        "informacionRetiro"
-    );
-
-
-    ocultar(
-        "preguntaRetiro"
-    );
-
-
-    ocultar(
-        "resultadoRetiro"
-    );
-
-
-    mostrar(
-        "inicioRetiro"
-    );
-
-}
-
 
 // ============================================================
 // INICIAR RETIRO
 // ============================================================
 
-function iniciarRetiro() {
+async function iniciarRetiro() {
+    if (operacionEnCurso) {
+        return;
+    }
+
+    operacionEnCurso = true;
 
     ocultar(
         "inicioRetiro"
     );
 
-
     mostrar(
         "esperandoHuellaRetiro"
     );
 
-
     cambiarTexto(
-
         "mensajeHuellaRetiro",
-
         "Coloque la huella del alumno."
-
     );
-
-
-    identificarAlumnoRetiro();
-
-}
-
-
-// ============================================================
-// IDENTIFICAR ALUMNO PARA RETIRO
-// ============================================================
-
-async function identificarAlumnoRetiro() {
 
     try {
 
-        const respuesta =
-            await fetch(
-
-                "/api/alumno/identificar-huella",
-
-                {
-
-                    method: "POST"
-
-                }
-
-            );
-
-
         const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-
-                "mensajeHuellaRetiro",
-
-                datos.mensaje
-
+            await postJSON(
+                "/api/alumno/esperar-huella"
             );
 
+        alumnoRetiro = {
 
-            return;
+            id:
+                datos.alumno_id,
 
-        }
+            numero_lista:
+                datos.numero_lista,
 
+            nombre:
+                datos.nombre,
 
-        alumnoRetiro =
-            datos;
+            apellido:
+                datos.apellido,
 
+            compartimento:
+                datos.compartimento,
+
+            usuario_huella:
+                datos.usuario_huella
+        };
 
         cambiarTexto(
-
             "numeroRetiro",
-
-            datos.numero_lista
-
+            alumnoRetiro.numero_lista
         );
 
-
         cambiarTexto(
-
             "nombreRetiro",
-
-            datos.nombre +
-            " " +
-            datos.apellido
-
+            nombreCompleto(
+                alumnoRetiro
+            )
         );
 
-
         cambiarTexto(
-
             "compartimentoRetiro",
 
-            datos.compartimento
-
+            alumnoRetiro.compartimento === null ||
+            typeof alumnoRetiro.compartimento === "undefined"
+                ? "Sin compartimento"
+                : alumnoRetiro.compartimento
         );
-
 
         ocultar(
             "esperandoHuellaRetiro"
         );
 
-
         mostrar(
             "informacionRetiro"
         );
 
-
         mostrar(
             "preguntaRetiro"
         );
 
-
     } catch (error) {
 
-        console.error(error);
-
-
-        cambiarTexto(
-
-            "mensajeHuellaRetiro",
-
-            "Error comunicando con el lector."
-
+        console.error(
+            "Error identificando alumno para retiro:",
+            error
         );
 
-    }
+        cambiarTexto(
+            "mensajeHuellaRetiro",
+            error.message
+        );
 
+        mostrar(
+            "inicioRetiro"
+        );
+
+        ocultar(
+            "esperandoHuellaRetiro"
+        );
+
+    } finally {
+        operacionEnCurso = false;
+    }
 }
 
-
 // ============================================================
-// RETIRAR CON CELULAR
+// RETIRO - CON CELULAR
 // ============================================================
 
 async function retirarConCelular() {
 
-    if (!alumnoRetiro) {
-
+    if (
+        !alumnoRetiro ||
+        operacionEnCurso
+    ) {
         return;
-
     }
 
+    operacionEnCurso = true;
 
     try {
 
-        const apertura =
-            await fetch(
+        // ----------------------------------------------------
+        // Abrir locker
+        // ----------------------------------------------------
 
-                "/api/locker/abrir",
-
-                {
-                    method: "POST"
-                }
-
-            );
-
-
-        const datosApertura =
-            await apertura.json();
-
-
-        if (!datosApertura.ok) {
-
-            alert(
-                "No se pudo abrir el locker."
-            );
-
-
-            return;
-
-        }
-
-
-        const respuesta =
-            await fetch(
-
-                "/api/retiro",
-
-                {
-
-                    method: "POST",
-
-                    headers: {
-
-                        "Content-Type":
-                            "application/json"
-
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoRetiro.alumno_id,
-
-                        retiro_celular:
-                            true
-
-                    })
-
-                }
-
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (!datos.ok) {
-
-            alert(
-                datos.mensaje
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "preguntaRetiro"
+        await postJSON(
+            "/api/locker/abrir"
         );
-
-
-        mostrar(
-            "resultadoRetiro"
-        );
-
 
         cambiarTexto(
-
-            "resultadoRetiro",
-
-            "✓ Retiro registrado a las " +
-            datos.hora
-
+            "mensajeGeneral",
+            "Locker abierto. Retire el celular."
         );
 
+        mostrarMensaje(
+            "Locker abierto. Retire el celular del compartimento " +
+            alumnoRetiro.compartimento +
+            ".",
+            5000
+        );
+
+        // ----------------------------------------------------
+        // Registrar retiro
+        // ----------------------------------------------------
+
+        const datos =
+            await postJSON(
+                "/api/retiro",
+                {
+                    alumno_id:
+                        alumnoRetiro.id,
+
+                    retiro_celular:
+                        true,
+
+                    compartimento:
+                        alumnoRetiro.compartimento
+                }
+            );
+
+        // ----------------------------------------------------
+        // Actualizar lista de alumnos
+        // ----------------------------------------------------
+
+        await cargarAlumnos();
+
+        // ----------------------------------------------------
+        // Mostrar resultado
+        // ----------------------------------------------------
+
+        mostrarResultadoRetiro(
+            "✓ Retiro registrado a las " +
+            (
+                datos.hora ||
+                "hora actual"
+            ) +
+            ". Celular retirado correctamente."
+        );
 
     } catch (error) {
 
-        console.error(error);
-
-
-        alert(
-            "Error de comunicación."
+        console.error(
+            "Error en retiro con celular:",
+            error
         );
 
-    }
+        mostrarMensaje(
+            error.message
+        );
 
+    } finally {
+
+        operacionEnCurso = false;
+    }
 }
 
 
 // ============================================================
-// RETIRAR SIN CELULAR
+// RETIRO - SIN CELULAR
 // ============================================================
 
 async function retirarSinCelular() {
 
-    if (!alumnoRetiro) {
-
+    if (
+        !alumnoRetiro ||
+        operacionEnCurso
+    ) {
         return;
-
     }
 
+    operacionEnCurso = true;
 
     try {
 
-        const respuesta =
-            await fetch(
-
+        const datos =
+            await postJSON(
                 "/api/retiro",
-
                 {
+                    alumno_id:
+                        alumnoRetiro.id,
 
-                    method: "POST",
-
-                    headers: {
-
-                        "Content-Type":
-                            "application/json"
-
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoRetiro.alumno_id,
-
-                        retiro_celular:
-                            false
-
-                    })
-
+                    retiro_celular:
+                        false
                 }
-
             );
 
+        // ----------------------------------------------------
+        // Actualizar lista desde SQLite
+        // ----------------------------------------------------
 
-        const datos =
-            await respuesta.json();
+        await cargarAlumnos();
 
+        // ----------------------------------------------------
+        // Mostrar resultado
+        // ----------------------------------------------------
 
-        if (!datos.ok) {
-
-            alert(
-                datos.mensaje
-            );
-
-
-            return;
-
-        }
-
-
-        ocultar(
-            "preguntaRetiro"
+        mostrarResultadoRetiro(
+            "✓ Retiro temprano registrado a las " +
+            (
+                datos.hora ||
+                "hora actual"
+            ) +
+            "."
         );
-
-
-        mostrar(
-            "resultadoRetiro"
-        );
-
-
-        cambiarTexto(
-
-            "resultadoRetiro",
-
-            "✓ Retiro registrado a las " +
-            datos.hora
-
-        );
-
 
     } catch (error) {
 
-        console.error(error);
-
-
-        alert(
-            "Error de comunicación."
+        console.error(
+            "Error en retiro sin celular:",
+            error
         );
 
-    }
-
-}
-
-
-// ============================================================
-// FINALIZAR HORA
-// ============================================================
-
-async function finalizarHora() {
-
-    const confirmar =
-        confirm(
-
-            "¿Está seguro de que desea finalizar la hora?"
-
+        mostrarMensaje(
+            error.message
         );
 
+    } finally {
 
-    if (!confirmar) {
-
-        return;
-
+        operacionEnCurso = false;
     }
-
-
-    try {
-
-        const respuesta =
-            await fetch(
-
-                "/api/finalizar",
-
-                {
-
-                    method: "POST"
-
-                }
-
-            );
-
-
-        const datos =
-            await respuesta.json();
-
-
-        if (datos.ok) {
-
-            mostrarPantalla(
-                "pantallaLogin"
-            );
-
-
-        }
-
-
-    } catch (error) {
-
-        console.error(error);
-
-
-        alert(
-            "No se pudo finalizar la hora."
-        );
-
-    }
-
 }
 
 
 // ============================================================
-// FUNCIONES GENERALES
+// RESULTADO RETIRO
 // ============================================================
 
-function mostrar(id) {
-
-    const elemento =
-        document.getElementById(id);
-
-
-    if (elemento) {
-
-        elemento.style.display =
-            "block";
-
-    }
-
-}
-
-
-function ocultar(id) {
-
-    const elemento =
-        document.getElementById(id);
-
-
-    if (elemento) {
-
-        elemento.style.display =
-            "none";
-
-    }
-
-}
-
-
-function cambiarTexto(
-    id,
+function mostrarResultadoRetiro(
     texto
 ) {
 
-    const elemento =
-        document.getElementById(id);
+    ocultar(
+        "preguntaRetiro"
+    );
 
+    ocultar(
+        "esperandoHuellaRetiro"
+    );
 
-    if (elemento) {
+    mostrar(
+        "resultadoRetiro"
+    );
 
-        elemento.innerText =
-            texto;
-
-    }
-
-}
-
-
-function mostrarMensaje(
-    texto
-) {
-
-    const elemento =
-        document.getElementById(
-            "mensajeGeneral"
-        );
-
-
-    if (elemento) {
-
-        elemento.innerText =
-            texto;
-
-    }
-
-}
-// ============================================================
-// LLEGADA SIN CELULAR
-// ============================================================
-
-async function llegadaSinCelular() {
-
-    await registrarLlegada(
-        false
+    cambiarTexto(
+        "resultadoRetiro",
+        texto
     );
 }
 
 
 // ============================================================
-// REGISTRAR LLEGADA
+// TERMINAR HORA
+// ============================================================
+//
+// Flujo:
+//
+// 1. Buscar alumnos con celular guardado.
+// 2. Abrir locker.
+// 3. Alumno retira celular.
+// 4. Esperar que el boton quede libre.
+// 5. Pedir huella.
+// 6. Verificar identidad.
+// 7. Registrar devolucion.
+// 8. Pasar al siguiente alumno.
+// 9. Cuando no quedan alumnos, finalizar hora.
+//
 // ============================================================
 
-async function registrarLlegada(
-    trajoCelular
-) {
+async function finalizarHora() {
+
+    if (operacionEnCurso) {
+        return;
+    }
+
+    const confirmar =
+        window.confirm(
+            "¿Está seguro de que desea terminar la hora?"
+        );
+
+    if (!confirmar) {
+        return;
+    }
+
+    operacionEnCurso = true;
 
     try {
 
-        const respuesta =
-            await fetch(
-                "/api/llegada",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoSeleccionado.id,
-
-                        trajo_celular:
-                            trajoCelular
-
-                    })
-
-                }
-            );
+        // ----------------------------------------------------
+        // Buscar alumnos que todavía tienen celular guardado.
+        // ----------------------------------------------------
 
         const datos =
-            await respuesta.json();
-
-        if (!datos.ok) {
-
-            alert(
-                datos.mensaje
+            await jsonFetch(
+                "/api/finalizar/pendientes"
             );
+
+        alumnosDevolucion =
+            Array.isArray(
+                datos.alumnos
+            )
+                ? datos.alumnos
+                : [];
+
+        indiceDevolucion = 0;
+
+        // ----------------------------------------------------
+        // Preparar pantalla de devolución.
+        // ----------------------------------------------------
+
+        ocultar(
+            "preguntaPresente"
+        );
+
+        ocultar(
+            "preguntaCelular"
+        );
+
+        ocultar(
+            "esperandoCelular"
+        );
+
+        ocultar(
+            "esperandoHuella"
+        );
+
+        mostrar(
+            "listaTerminada"
+        );
+
+        const titulo =
+            document.querySelector(
+                "#listaTerminada h2"
+            );
+
+        if (titulo) {
+            titulo.textContent =
+                "Devolución de celulares";
+        }
+
+        const boton =
+            document.querySelector(
+                "#listaTerminada button"
+            );
+
+        if (boton) {
+            boton.style.display =
+                "none";
+        }
+
+        // ----------------------------------------------------
+        // Si nadie tiene celular guardado.
+        // ----------------------------------------------------
+
+        if (
+            alumnosDevolucion.length === 0
+        ) {
+
+            cambiarTexto(
+                "mensajeFinal",
+                "No hay celulares guardados."
+            );
+
+            await terminarHoraDefinitivamente();
 
             return;
         }
 
-        ocultar(
-            "esperandoCelularLlegada"
-        );
+        // ----------------------------------------------------
+        // Comenzar devolución.
+        // ----------------------------------------------------
 
-        mostrar(
-            "resultadoLlegada"
-        );
-
-        cambiarTexto(
-            "resultadoLlegada",
-            "✓ Llegada registrada a las " +
-            datos.hora
-        );
+        await procesarSiguienteDevolucion();
 
     } catch (error) {
 
-        console.error(error);
+        console.error(
+            "Error iniciando devolución:",
+            error
+        );
 
+        cambiarTexto(
+            "mensajeFinal",
+            "ERROR:\n\n" +
+            error.message
+        );
+
+        operacionEnCurso = false;
     }
 }
 
 
 // ============================================================
-// RETIRO
+// PROCESAR SIGUIENTE DEVOLUCION
 // ============================================================
 
-async function cargarListaRetiro() {
+async function procesarSiguienteDevolucion() {
+
+    // --------------------------------------------------------
+    // ¿Ya terminamos todos?
+    // --------------------------------------------------------
+
+    if (
+        indiceDevolucion >=
+        alumnosDevolucion.length
+    ) {
+
+        await terminarHoraDefinitivamente();
+
+        return;
+    }
+
+    const alumno =
+        alumnosDevolucion[
+            indiceDevolucion
+        ];
+
+    // --------------------------------------------------------
+    // Mostrar información inicial.
+    // --------------------------------------------------------
+
+    cambiarTexto(
+        "mensajeFinal",
+
+        "Devolución " +
+        (
+            indiceDevolucion + 1
+        ) +
+        " de " +
+        alumnosDevolucion.length +
+        "\n\n" +
+
+        "Alumno: " +
+        alumno.numero_lista +
+        " - " +
+        nombreCompleto(
+            alumno
+        ) +
+        "\n\n" +
+
+        "Compartimento: " +
+        alumno.compartimento
+    );
 
     try {
 
-        const respuesta =
-            await fetch(
+        // ----------------------------------------------------
+        // PASO 1:
+        // Abrir locker.
+        // ----------------------------------------------------
+
+        cambiarTexto(
+            "mensajeFinal",
+
+            "Alumno " +
+            alumno.numero_lista +
+            " - " +
+            nombreCompleto(
+                alumno
+            ) +
+            "\n\n" +
+
+            "Abriendo locker..."
+        );
+
+        await postJSON(
+            "/api/locker/abrir"
+        );
+
+        // ----------------------------------------------------
+        // PASO 2:
+        // Retirar celular.
+        // ----------------------------------------------------
+
+        cambiarTexto(
+            "mensajeFinal",
+
+            "Alumno " +
+            alumno.numero_lista +
+            " - " +
+            nombreCompleto(
+                alumno
+            ) +
+            "\n\n" +
+
+            "Retire el celular del compartimento " +
+            alumno.compartimento +
+            ".\n\n" +
+
+            "Al sacar el celular, " +
+            "el botón debe quedar LIBRE."
+        );
+
+        // ----------------------------------------------------
+        // PASO 3:
+        // Esperar liberación del botón.
+        // ----------------------------------------------------
+
+        await postJSON(
+            "/api/celular/esperar-liberacion",
+            {
+                alumno_id:
+                    alumno.id,
+
+                compartimento:
+                    alumno.compartimento
+            }
+        );
+
+        // ----------------------------------------------------
+        // PASO 4:
+        // Pedir huella.
+        // ----------------------------------------------------
+
+        cambiarTexto(
+            "mensajeFinal",
+
+            "✓ Celular retirado.\n\n" +
+
+            "Alumno " +
+            alumno.numero_lista +
+            ":\n" +
+            nombreCompleto(
+                alumno
+            ) +
+            "\n\n" +
+
+            "COLOQUE SU HUELLA EN EL LECTOR."
+        );
+
+        console.log(
+            "Solicitando huella para alumno:",
+            alumno.id
+        );
+
+        // ----------------------------------------------------
+        // PASO 5:
+        // Verificar huella.
+        //
+        // Este fetch hace que Python llame al DigitalPersona.
+        // ----------------------------------------------------
+
+        await postJSON(
+            "/api/alumno/" +
+            alumno.id +
+            "/verificar-huella"
+        );
+
+        console.log(
+            "Huella reconocida para alumno:",
+            alumno.id
+        );
+
+        cambiarTexto(
+            "mensajeFinal",
+
+            "✓ Huella reconocida.\n\n" +
+            "Registrando devolución..."
+        );
+
+        // ----------------------------------------------------
+        // PASO 6:
+        // Registrar devolución.
+        // ----------------------------------------------------
+
+        await postJSON(
+            "/api/finalizar/devolver",
+            {
+                alumno_id:
+                    alumno.id
+            }
+        );
+
+        // ----------------------------------------------------
+        // PASO 7:
+        // Actualizar alumnos.
+        // ----------------------------------------------------
+
+        try {
+
+            const datosActualizados =
+                await jsonFetch(
+                    "/api/alumnos"
+                );
+
+            alumnos =
+                Array.isArray(
+                    datosActualizados.alumnos
+                )
+                    ? datosActualizados.alumnos
+                    : [];
+
+        } catch (error) {
+
+            console.warn(
+                "No se pudo actualizar la lista:",
+                error
+            );
+        }
+
+        // ----------------------------------------------------
+        // PASO 8:
+        // Mostrar confirmación.
+        // ----------------------------------------------------
+
+        cambiarTexto(
+            "mensajeFinal",
+
+            "✓ Devolución registrada.\n\n" +
+
+            "Alumno " +
+            alumno.numero_lista +
+            " completado."
+        );
+
+        // ----------------------------------------------------
+        // PASO 9:
+        // Siguiente alumno.
+        // ----------------------------------------------------
+
+        indiceDevolucion += 1;
+
+        setTimeout(
+            function () {
+
+                procesarSiguienteDevolucion();
+
+            },
+            1000
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Error en devolución:",
+            error
+        );
+
+        // ----------------------------------------------------
+        // MUY IMPORTANTE:
+        //
+        // NO avanzamos al siguiente alumno.
+        //
+        // Si falla la liberación del botón o la huella,
+        // el sistema queda detenido en este alumno.
+        // ----------------------------------------------------
+
+        cambiarTexto(
+            "mensajeFinal",
+
+            "ERROR CON EL ALUMNO " +
+            alumno.numero_lista +
+            "\n\n" +
+
+            error.message +
+            "\n\n" +
+
+            "No se continuará con el siguiente alumno " +
+            "hasta completar esta devolución."
+        );
+
+        // No modificar indiceDevolucion.
+        // No llamar a procesarSiguienteDevolucion().
+    }
+}
+
+
+// ============================================================
+// FINALIZAR DEFINITIVAMENTE LA HORA
+// ============================================================
+
+async function terminarHoraDefinitivamente() {
+
+    try {
+
+        await postJSON(
+            "/api/finalizar"
+        );
+
+        const titulo =
+            document.querySelector(
+                "#listaTerminada h2"
+            );
+
+        if (titulo) {
+
+            titulo.textContent =
+                "Hora terminada";
+        }
+
+        cambiarTexto(
+            "mensajeFinal",
+
+            "✓ Todos los celulares fueron retirados.\n\n" +
+            "La hora terminó correctamente."
+        );
+
+        const boton =
+            document.querySelector(
+                "#listaTerminada button"
+            );
+
+        if (boton) {
+
+            boton.style.display =
+                "inline-block";
+
+            boton.textContent =
+                "VOLVER AL MENÚ";
+        }
+
+    } catch (error) {
+
+        console.error(
+            "Error finalizando hora:",
+            error
+        );
+
+        cambiarTexto(
+            "mensajeFinal",
+
+            "Error finalizando la hora:\n\n" +
+            error.message
+        );
+
+    } finally {
+
+        operacionEnCurso =
+            false;
+    }
+}
+
+// ============================================================
+// FUNCIONES AUXILIARES FINALES
+// ============================================================
+
+function regresarAlMenu() {
+    mostrarPantalla(
+        "pantallaMenu"
+    );
+}
+
+
+// ============================================================
+// ACTUALIZAR DATOS DE ALUMNOS
+// ============================================================
+
+async function actualizarAlumnos() {
+
+    try {
+
+        const datos =
+            await jsonFetch(
                 "/api/alumnos"
             );
 
-        const datos =
-            await respuesta.json();
+        alumnos =
+            Array.isArray(
+                datos.alumnos
+            )
+                ? datos.alumnos
+                : [];
 
-        if (!datos.ok) {
+        return alumnos;
+
+    } catch (error) {
+
+        console.error(
+            "No se pudieron actualizar los alumnos:",
+            error
+        );
+
+        return alumnos;
+    }
+}
+
+
+// ============================================================
+// COMPROBAR ESTADO DEL SISTEMA
+// ============================================================
+
+async function consultarEstado() {
+
+    try {
+
+        const datos =
+            await jsonFetch(
+                "/api/estado"
+            );
+
+        console.log(
+            "Estado del sistema:",
+            datos
+        );
+
+        return datos;
+
+    } catch (error) {
+
+        console.error(
+            "No se pudo consultar el estado:",
+            error
+        );
+
+        return null;
+    }
+}
+
+
+// ============================================================
+// COMPROBAR ESTADO DEL LECTOR
+// ============================================================
+
+async function consultarEstadoHuella() {
+
+    try {
+
+        const datos =
+            await jsonFetch(
+                "/api/huella/estado"
+            );
+
+        console.log(
+            "Estado del lector:",
+            datos
+        );
+
+        return datos;
+
+    } catch (error) {
+
+        console.error(
+            "No se pudo consultar el lector:",
+            error
+        );
+
+        return null;
+    }
+}
+
+
+// ============================================================
+// COMPROBAR BOTÓN DE UN COMPARTIMENTO
+// ============================================================
+
+async function consultarBoton(
+    compartimento
+) {
+
+    try {
+
+        const datos =
+            await jsonFetch(
+                "/api/boton/" +
+                compartimento
+            );
+
+        return datos.presionado;
+
+    } catch (error) {
+
+        console.error(
+            "Error consultando boton:",
+            error
+        );
+
+        return false;
+    }
+}
+
+
+// ============================================================
+// ENCENDER LED MANUALMENTE
+// ============================================================
+
+async function encenderLED(
+    compartimento
+) {
+
+    try {
+
+        await postJSON(
+            "/api/led/" +
+            compartimento
+        );
+
+        mostrarLED(
+            "ledConfirmacion"
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Error encendiendo LED:",
+            error
+        );
+    }
+}
+
+
+// ============================================================
+// VOLVER A LA PANTALLA DE LOGIN
+// ============================================================
+
+function volverAlLogin() {
+
+    alumnoSeleccionado =
+        null;
+
+    alumnoRetiro =
+        null;
+
+    alumnosDevolucion =
+        [];
+
+    indiceDevolucion =
+        0;
+
+    alumnoActual =
+        0;
+
+    operacionEnCurso =
+        false;
+
+    ocultar(
+        "listaTerminada"
+    );
+
+    ocultar(
+        "resultadoLlegada"
+    );
+
+    ocultar(
+        "resultadoRetiro"
+    );
+
+    bloquearBoton(
+        "botonHuella",
+        false
+    );
+
+    cambiarTexto(
+        "mensajeLogin",
+        "Esperando identificación..."
+    );
+
+    mostrarPantalla(
+        "pantallaLogin"
+    );
+}
+
+
+// ============================================================
+// REFRESCAR LISTA DESDE EL SERVIDOR
+// ============================================================
+
+async function refrescarListaActual() {
+
+    try {
+
+        const datos =
+            await jsonFetch(
+                "/api/alumnos"
+            );
+
+        alumnos =
+            Array.isArray(
+                datos.alumnos
+            )
+                ? datos.alumnos
+                : [];
+
+        return true;
+
+    } catch (error) {
+
+        console.error(
+            "Error actualizando lista:",
+            error
+        );
+
+        return false;
+    }
+}
+
+
+// ============================================================
+// INICIALIZACIÓN
+// ============================================================
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+
+        // ----------------------------------------------------
+        // Estado inicial de la interfaz
+        // ----------------------------------------------------
+
+        ocultar(
+            "mensajeGeneral"
+        );
+
+        ocultar(
+            "preguntaCelular"
+        );
+
+        ocultar(
+            "esperandoCelular"
+        );
+
+        ocultar(
+            "esperandoHuella"
+        );
+
+        ocultar(
+            "listaTerminada"
+        );
+
+        ocultar(
+            "alumnoSeleccionado"
+        );
+
+        ocultar(
+            "esperandoHuellaLlegada"
+        );
+
+        ocultar(
+            "preguntaCelularLlegada"
+        );
+
+        ocultar(
+            "esperandoCelularLlegada"
+        );
+
+        ocultar(
+            "resultadoLlegada"
+        );
+
+        ocultar(
+            "inicioRetiro"
+        );
+
+        ocultar(
+            "esperandoHuellaRetiro"
+        );
+
+        ocultar(
+            "informacionRetiro"
+        );
+
+        ocultar(
+            "preguntaRetiro"
+        );
+
+        ocultar(
+            "resultadoRetiro"
+        );
+
+        // ----------------------------------------------------
+        // Mostrar login
+        // ----------------------------------------------------
+
+        mostrarPantalla(
+            "pantallaLogin"
+        );
+
+        // ----------------------------------------------------
+        // Consultas iniciales
+        // ----------------------------------------------------
+
+        consultarEstado();
+
+    }
+);
+
+
+// ============================================================
+// EVITAR SALIDAS ACCIDENTALES DURANTE UNA DEVOLUCIÓN
+// ============================================================
+
+window.addEventListener(
+    "beforeunload",
+    function (evento) {
+
+        if (
+            alumnosDevolucion.length > 0 &&
+            indiceDevolucion <
+                alumnosDevolucion.length
+        ) {
+
+            evento.preventDefault();
+
+            evento.returnValue = "";
+
+        }
+
+    }
+);
+
+
+async function actualizarListaAusentes() {
+    const contenedor =
+        document.getElementById(
+            "listaAusentes"
+        );
+
+    if (!contenedor) {
+        return;
+    }
+
+    try {
+        const datos =
+            await jsonFetch(
+                "/api/alumnos"
+            );
+
+        const lista =
+            (datos.alumnos || [])
+                .filter(
+                    function (alumno) {
+                        return (
+                            Number(alumno.presente) === 0 &&
+                            Number(alumno.se_retiro) !== 1
+                        );
+                    }
+                );
+
+        contenedor.innerHTML = "";
+
+        const titulo =
+            document.createElement(
+                "h2"
+            );
+
+        titulo.textContent =
+            "Seleccione el alumno que llego tarde:";
+
+        contenedor.appendChild(
+            titulo
+        );
+
+        if (lista.length === 0) {
+            const mensaje =
+                document.createElement(
+                    "p"
+                );
+
+            mensaje.textContent =
+                "No hay alumnos ausentes.";
+
+            contenedor.appendChild(
+                mensaje
+            );
+
             return;
         }
 
-        alumnos =
-            datos.alumnos;
-
-        const lista =
-            document.getElementById(
-                "listaRetiro"
-            );
-
-        lista.innerHTML = "";
-
-        alumnos.forEach(
+        lista.forEach(
             function (alumno) {
-
-                if (
-                    alumno.se_retiro === 1
-                ) {
-                    return;
-                }
 
                 const boton =
                     document.createElement(
@@ -6014,374 +2286,36 @@ async function cargarListaRetiro() {
                 boton.className =
                     "alumno-boton";
 
-                boton.innerText =
-                    alumno.numero_lista +
-                    " - " +
-                    alumno.nombre +
-                    " " +
-                    alumno.apellido;
+                boton.type =
+                    "button";
 
-                boton.onclick =
+                boton.textContent =
+                    `${alumno.numero_lista} - ${nombreCompleto(alumno)}`;
+
+                boton.addEventListener(
+                    "click",
                     function () {
-
-                        seleccionarAlumnoRetiro(
+                        seleccionarAlumnoLlegada(
                             alumno
                         );
+                    }
+                );
 
-                    };
-
-                lista.appendChild(
+                contenedor.appendChild(
                     boton
                 );
-
             }
         );
 
     } catch (error) {
 
-        console.error(error);
-
-    }
-}
-
-
-// ============================================================
-// SELECCIONAR RETIRO
-// ============================================================
-
-function seleccionarAlumnoRetiro(
-    alumno
-) {
-
-    alumnoRetiro =
-        alumno;
-
-    cambiarTexto(
-        "numeroRetiro",
-        "Nº " +
-        alumno.numero_lista
-    );
-
-    cambiarTexto(
-        "nombreRetiro",
-        alumno.nombre +
-        " " +
-        alumno.apellido
-    );
-
-    cambiarTexto(
-        "compartimentoRetiro",
-        alumno.compartimento
-    );
-
-    ocultar(
-        "inicioRetiro"
-    );
-
-    mostrar(
-        "informacionRetiro"
-    );
-
-    mostrar(
-        "esperandoHuellaRetiro"
-    );
-
-    cambiarTexto(
-        "mensajeHuellaRetiro",
-        "Coloque la huella del alumno."
-    );
-
-    verificarHuellaRetiro();
-
-}
-
-
-// ============================================================
-// HUELLA RETIRO
-// ============================================================
-
-async function verificarHuellaRetiro() {
-
-    if (!alumnoRetiro) {
-        return;
-    }
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/alumno/esperar-huella",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoRetiro.id
-
-                    })
-
-                }
-            );
-
-        const datos =
-            await respuesta.json();
-
-        if (!datos.ok) {
-
-            cambiarTexto(
-                "mensajeHuellaRetiro",
-                datos.mensaje
-            );
-
-            return;
-        }
-
-        ocultar(
-            "esperandoHuellaRetiro"
+        console.error(
+            "Error actualizando lista de ausentes:",
+            error
         );
 
-        mostrar(
-            "preguntaRetiro"
+        mostrarMensaje(
+            error.message
         );
-
-    } catch (error) {
-
-        console.error(error);
-
-    }
-}
-
-
-// ============================================================
-// RETIRO CON CELULAR
-// ============================================================
-
-async function retirarConCelular() {
-
-    if (!alumnoRetiro) {
-        return;
-    }
-
-    try {
-
-        const apertura =
-            await fetch(
-                "/api/locker/abrir",
-                {
-                    method: "POST"
-                }
-            );
-
-        const datosApertura =
-            await apertura.json();
-
-        if (!datosApertura.ok) {
-
-            alert(
-                datosApertura.mensaje
-            );
-
-            return;
-        }
-
-        const respuesta =
-            await fetch(
-                "/api/retiro",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoRetiro.id,
-
-                        retiro_celular:
-                            true
-
-                    })
-
-                }
-            );
-
-        const datos =
-            await respuesta.json();
-
-        if (!datos.ok) {
-
-            alert(
-                datos.mensaje
-            );
-
-            return;
-        }
-
-        ocultar(
-            "preguntaRetiro"
-        );
-
-        mostrar(
-            "resultadoRetiro"
-        );
-
-        cambiarTexto(
-            "resultadoRetiro",
-            "✓ Retiro registrado a las " +
-            datos.hora
-        );
-
-    } catch (error) {
-
-        console.error(error);
-
-        alert(
-            "Error de comunicación."
-        );
-
-    }
-}
-
-
-// ============================================================
-// RETIRO SIN CELULAR
-// ============================================================
-
-async function retirarSinCelular() {
-
-    if (!alumnoRetiro) {
-        return;
-    }
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/retiro",
-                {
-
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        alumno_id:
-                            alumnoRetiro.id,
-
-                        retiro_celular:
-                            false
-
-                    })
-
-                }
-            );
-
-        const datos =
-            await respuesta.json();
-
-        if (!datos.ok) {
-
-            alert(
-                datos.mensaje
-            );
-
-            return;
-        }
-
-        ocultar(
-            "preguntaRetiro"
-        );
-
-        mostrar(
-            "resultadoRetiro"
-        );
-
-        cambiarTexto(
-            "resultadoRetiro",
-            "✓ Retiro registrado a las " +
-            datos.hora
-        );
-
-    } catch (error) {
-
-        console.error(error);
-
-    }
-}
-
-
-// ============================================================
-// FINALIZAR HORA
-// ============================================================
-
-async function finalizarHora() {
-
-    const confirmar =
-        confirm(
-            "¿Está seguro de que desea finalizar la hora?"
-        );
-
-    if (!confirmar) {
-        return;
-    }
-
-    try {
-
-        const respuesta =
-            await fetch(
-                "/api/finalizar",
-                {
-                    method: "POST"
-                }
-            );
-
-        const datos =
-            await respuesta.json();
-
-        if (datos.ok) {
-
-            mostrarPantalla(
-                "pantallaLogin"
-            );
-
-            cambiarTexto(
-                "mensajeLogin",
-                "Esperando identificación..."
-            );
-
-            const boton =
-                document.getElementById(
-                    "botonHuella"
-                );
-
-            if (boton) {
-                boton.disabled = false;
-            }
-
-        }
-
-    } catch (error) {
-
-        console.error(error);
-
-        alert(
-            "No se pudo finalizar la hora."
-        );
-
     }
 }

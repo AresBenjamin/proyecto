@@ -218,9 +218,9 @@ app = Flask(
 
     __name__,
 
-    template_folder="templates",
+    template_folder=BASE_DIR,
 
-    static_folder="static"
+    static_folder=os.path.join(BASE_DIR, "static")
 
 )
 
@@ -834,6 +834,85 @@ def esperar_boton(
         "Tiempo agotado esperando botón."
     )
 
+    return False
+
+
+# ============================================================
+# ESPERAR LIBERACION DEL BOTON
+# ============================================================
+# Durante el guardado del celular, el boton pasa de libre a
+# presionado. Al finalizar la hora, el alumno retira el celular
+# y el boton vuelve a quedar libre.
+#
+# Con PUD_UP:
+#     LOW  = presionado
+#     HIGH = libre
+# ============================================================
+
+def esperar_liberacion(
+    compartimento,
+    timeout=120
+):
+
+    pin = BUTTON_PINS.get(
+        compartimento
+    )
+
+    if pin is None:
+        return False
+
+    print(
+        f"Esperando retiro del celular del compartimento {compartimento}"
+    )
+
+    if not GPIO_AVAILABLE:
+        print(
+            "GPIO no disponible: simulacion de retiro."
+        )
+        time.sleep(1)
+        return True
+
+    inicio = time.time()
+
+    # --------------------------------------------------------
+    # Primero esperamos a que el boton quede confirmado como
+    # presionado. Esto evita aceptar accidentalmente un boton
+    # que ya estaba libre antes de comenzar la devolucion.
+    # --------------------------------------------------------
+
+    while time.time() - inicio < 5:
+        if GPIO.input(pin) == GPIO.LOW:
+            break
+        time.sleep(0.05)
+    else:
+        print(
+            "No se detecto el boton presionado antes del retiro."
+        )
+        return False
+
+    # --------------------------------------------------------
+    # Ahora esperamos que el alumno retire el celular y el
+    # boton pase de LOW a HIGH.
+    # --------------------------------------------------------
+
+    while time.time() - inicio < timeout:
+
+        if GPIO.input(pin) == GPIO.HIGH:
+
+            time.sleep(0.10)
+
+            if GPIO.input(pin) == GPIO.HIGH:
+
+                print(
+                    "Boton liberado. Celular retirado."
+                )
+                return True
+
+        time.sleep(0.05)
+
+    print(
+        "Tiempo agotado esperando la liberacion del boton."
+    )
     return False
 
 
@@ -1652,6 +1731,96 @@ def api_alumnos():
 
 
 # ============================================================
+# USUARIOS AUTORIZADOS
+# ============================================================
+
+def obtener_usuarios_personal():
+
+    conexion = conectar_db()
+
+    profesores = conexion.execute(
+        "SELECT nombre, usuario_huella, 'profesor' AS tipo FROM profesores WHERE usuario_huella IS NOT NULL AND usuario_huella != ''"
+    ).fetchall()
+
+    preceptores = conexion.execute(
+        "SELECT nombre, usuario_huella, 'preceptor' AS tipo FROM preceptores WHERE usuario_huella IS NOT NULL AND usuario_huella != ''"
+    ).fetchall()
+
+    conexion.close()
+
+    usuarios = []
+
+    for fila in profesores + preceptores:
+        usuarios.append(dict(fila))
+
+    # Mantener también el usuario configurado como profesor aunque
+    # todavía no exista en la tabla por una base antigua.
+    if PROFESOR_USUARIO:
+        existe = any(
+            usuario["usuario_huella"] == PROFESOR_USUARIO
+            for usuario in usuarios
+        )
+
+        if not existe:
+            usuarios.insert(
+                0,
+                {
+                    "nombre": "Profesor",
+                    "usuario_huella": PROFESOR_USUARIO,
+                    "tipo": "profesor"
+                }
+            )
+
+    return usuarios
+
+
+def identificar_personal():
+
+    usuarios = obtener_usuarios_personal()
+
+    if not usuarios:
+        return {
+            "ok": False,
+            "resultado": "sin_usuarios",
+            "mensaje": "No hay profesores o preceptores autorizados."
+        }
+
+    for usuario in usuarios:
+
+        resultado = fingerprint_manager.verificar_usuario(
+            usuario["usuario_huella"],
+            "Coloque la huella del profesor o preceptor."
+        )
+
+        if resultado["ok"]:
+            return {
+                "ok": True,
+                "usuario": usuario["usuario_huella"],
+                "nombre": usuario["nombre"],
+                "tipo": usuario["tipo"]
+            }
+
+        if resultado.get("resultado") in (
+            "lector_no_disponible",
+            "timeout"
+        ):
+            return {
+                "ok": False,
+                "resultado": resultado["resultado"],
+                "mensaje": fingerprint_status.get(
+                    "mensaje",
+                    "No se pudo utilizar el lector."
+                )
+            }
+
+    return {
+        "ok": False,
+        "resultado": "no-match",
+        "mensaje": "La huella no corresponde a un profesor o preceptor autorizado."
+    }
+
+
+# ============================================================
 # API LOGIN
 # ============================================================
 
@@ -1661,26 +1830,29 @@ def api_alumnos():
 )
 def api_login():
 
-    resultado = (
-        fingerprint_manager.verificar_usuario(
+    global sistema_finalizado
 
-            PROFESOR_USUARIO,
-
-            "Coloque la huella del profesor."
-        )
-    )
+    resultado = identificar_personal()
 
     if resultado["ok"]:
+
+        sistema_finalizado = False
 
         return jsonify({
 
             "ok": True,
 
             "mensaje":
-                "Huella del profesor reconocida.",
+                "Identificación autorizada.",
 
             "usuario":
-                PROFESOR_USUARIO
+                resultado["usuario"],
+
+            "nombre":
+                resultado["nombre"],
+
+            "rol":
+                resultado["tipo"]
 
         })
 
@@ -1689,11 +1861,15 @@ def api_login():
         "ok": False,
 
         "mensaje":
-            "La huella no corresponde "
-            "al profesor/preceptor.",
+            resultado.get(
+                "mensaje",
+                "La huella no corresponde a un usuario autorizado."
+            ),
 
         "resultado":
-            resultado["resultado"]
+            resultado.get(
+                "resultado"
+            )
 
     })
 
@@ -2369,9 +2545,7 @@ def api_llegada():
     "/api/alumno/<int:alumno_id>/celular",
     methods=["POST"]
 )
-def api_celular(
-    alumno_id
-):
+def api_celular(alumno_id):
 
     datos = (
         request.get_json(
@@ -2408,7 +2582,8 @@ def api_celular(
         """
         UPDATE alumnos
 
-        SET trajo_celular = ?
+        SET
+            trajo_celular = ?
 
         WHERE id = ?
         """,
@@ -2419,15 +2594,26 @@ def api_celular(
     )
 
     conexion.commit()
-
     conexion.close()
+
+    registrar_evento(
+        alumno_id,
+        "celular",
+        (
+            "Estado de celular actualizado. "
+            f"Trajo celular: {trajo}"
+        )
+    )
 
     return jsonify({
 
         "ok": True,
 
         "trajo":
-            trajo
+            trajo,
+
+        "compartimento":
+            alumno["compartimento"]
 
     })
 
@@ -2535,48 +2721,23 @@ def api_retiro():
 
         }), 404
 
-    # --------------------------------------------------------
-    # Si retira celular, comprobar compartimento
-    # --------------------------------------------------------
-
     if retiro_celular:
 
         if compartimento is None:
-
-            compartimento = alumno[
-                "compartimento"
-            ]
+            compartimento = alumno["compartimento"]
 
         try:
-
-            compartimento = int(
-                compartimento
-            )
-
-        except Exception:
-
+            compartimento = int(compartimento)
+        except (TypeError, ValueError):
             return jsonify({
-
                 "ok": False,
-
-                "mensaje":
-                    "Compartimento inválido."
-
+                "mensaje": "Compartimento inválido."
             }), 400
 
-        if (
-            compartimento
-            != alumno["compartimento"]
-        ):
-
+        if compartimento != alumno["compartimento"]:
             return jsonify({
-
                 "ok": False,
-
-                "mensaje":
-                    "El compartimento no corresponde "
-                    "al alumno."
-
+                "mensaje": "El compartimento no corresponde al alumno."
             }), 400
 
     fecha = ahora()
@@ -2588,41 +2749,233 @@ def api_retiro():
         UPDATE alumnos
 
         SET
+            presente = 0,
             se_retiro = 1,
-            hora_retiro = ?
+            hora_retiro = ?,
+            trajo_celular = ?
 
         WHERE id = ?
         """,
         (
             fecha,
+            0,
             alumno_id
         )
     )
 
     conexion.commit()
-
     conexion.close()
 
     registrar_evento(
-
         alumno_id,
-
         "retiro",
-
         (
             "Retiro registrado. "
-            f"Retiro de celular: "
-            f"{retiro_celular}"
+            f"Retiro de celular: {retiro_celular}. "
+            f"Compartimento: {compartimento if retiro_celular else 'sin celular'}"
         )
-
     )
 
     return jsonify({
 
         "ok": True,
 
-        "hora": fecha
+        "hora": fecha,
 
+        "alumno_id": alumno_id
+
+    })
+
+
+# ============================================================
+# API - ALUMNOS CON CELULAR GUARDADO
+# ============================================================
+
+@app.route(
+    "/api/finalizar/pendientes"
+)
+def api_finalizar_pendientes():
+
+    conexion = conectar_db()
+
+    filas = conexion.execute(
+        """
+        SELECT
+            id,
+            numero_lista,
+            nombre,
+            apellido,
+            compartimento,
+            usuario_huella
+        FROM alumnos
+        WHERE trajo_celular = 1
+          AND se_retiro = 0
+        ORDER BY compartimento, numero_lista
+        """
+    ).fetchall()
+
+    conexion.close()
+
+    return jsonify({
+        "ok": True,
+        "alumnos": [
+            dict(fila)
+            for fila in filas
+        ]
+    })
+
+
+# ============================================================
+# API - ESPERAR LIBERACION DEL BOTON
+# ============================================================
+
+@app.route(
+    "/api/celular/esperar-liberacion",
+    methods=["POST"]
+)
+def api_esperar_liberacion():
+
+    datos = (
+        request.get_json(
+            silent=True
+        )
+        or {}
+    )
+
+    alumno_id = datos.get(
+        "alumno_id"
+    )
+
+    compartimento = datos.get(
+        "compartimento"
+    )
+
+    if not alumno_id:
+        return jsonify({
+            "ok": False,
+            "mensaje": "Falta alumno_id."
+        }), 400
+
+    try:
+        compartimento = int(
+            compartimento
+        )
+    except (TypeError, ValueError):
+        return jsonify({
+            "ok": False,
+            "mensaje": "Compartimento invalido."
+        }), 400
+
+    alumno = obtener_alumno(
+        alumno_id
+    )
+
+    if alumno is None:
+        return jsonify({
+            "ok": False,
+            "mensaje": "Alumno inexistente."
+        }), 404
+
+    if alumno["compartimento"] != compartimento:
+        return jsonify({
+            "ok": False,
+            "mensaje": "El compartimento no corresponde al alumno."
+        }), 400
+
+    if int(alumno["trajo_celular"] or 0) != 1:
+        return jsonify({
+            "ok": False,
+            "mensaje": "Este alumno no tiene un celular guardado."
+        }), 400
+
+    correcto = esperar_liberacion(
+        compartimento
+    )
+
+    if not correcto:
+        return jsonify({
+            "ok": False,
+            "mensaje":
+                "No se detecto el retiro del celular. "
+                "Compruebe que el boton haya estado presionado "
+                "y luego haya quedado libre."
+        })
+
+    return jsonify({
+        "ok": True,
+        "mensaje":
+            "Celular retirado. Ahora coloque la huella."
+    })
+
+
+# ============================================================
+# API - CONFIRMAR DEVOLUCION DE CELULAR
+# ============================================================
+
+@app.route(
+    "/api/finalizar/devolver",
+    methods=["POST"]
+)
+def api_finalizar_devolver():
+
+    datos = (
+        request.get_json(
+            silent=True
+        )
+        or {}
+    )
+
+    alumno_id = datos.get(
+        "alumno_id"
+    )
+
+    if not alumno_id:
+        return jsonify({
+            "ok": False,
+            "mensaje": "Falta alumno_id."
+        }), 400
+
+    alumno = obtener_alumno(
+        alumno_id
+    )
+
+    if alumno is None:
+        return jsonify({
+            "ok": False,
+            "mensaje": "Alumno inexistente."
+        }), 404
+
+    if int(alumno["trajo_celular"] or 0) != 1:
+        return jsonify({
+            "ok": False,
+            "mensaje": "El alumno no tiene un celular registrado en el locker."
+        }), 400
+
+    fecha = ahora()
+
+    conexion = conectar_db()
+
+    conexion.execute(
+        """
+        UPDATE alumnos
+        SET trajo_celular = 0
+        WHERE id = ?
+        """,
+        (alumno_id,)
+    )
+
+    conexion.commit()
+    conexion.close()
+
+    registrar_evento(
+        alumno_id,
+        "devolucion_celular",
+        "Celular retirado al finalizar la hora."
+    )
+
+    return jsonify({
+        "ok": True,
+        "hora": fecha
     })
 
 
@@ -2648,6 +3001,14 @@ def api_finalizar():
             "Hora finalizada."
 
     })
+
+
+@app.route(
+    "/api/terminar-hora",
+    methods=["POST"]
+)
+def api_terminar_hora():
+    return api_finalizar()
 
 
 # ============================================================
