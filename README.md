@@ -187,16 +187,19 @@ Hardware
 Cables y elementos necesarios para realizar las conexiones.
 Fuente de alimentación adecuada para los componentes que la requieran.
 Conexiones GPIO
-Componente	        GPIO
-Relé	GPIO 17
-LED compartimento 1	GPIO 18
-LED compartimento 2	GPIO 23
-LED compartimento 3	GPIO 24
-LED compartimento 4	GPIO 25
-Botón 1	GPIO 5
-Botón 2	GPIO 6
-Botón 3	GPIO 13
-Botón 4	GPIO 19
+Componentes GPIO:
+
+| Componente            | GPIO |
+|-----------------------|------|
+| Relé                  | GPIO 17 |
+| LED compartimento 1   | GPIO 18 |
+| LED compartimento 2   | GPIO 23 |
+| LED compartimento 3   | GPIO 24 |
+| LED compartimento 4   | GPIO 25 |
+| Botón 1               | GPIO 5 |
+| Botón 2               | GPIO 6 |
+| Botón 3               | GPIO 13 |
+| Botón 4               | GPIO 19 |
 
 Los GPIO de la Raspberry Pi trabajan a 3,3 V. El relé y los LEDs deben conectarse utilizando los componentes de protección y resistencias correspondientes.
 
