@@ -755,6 +755,10 @@ def boton_presionado(
 # ESPERAR BOTÓN
 # ============================================================
 
+# ============================================================
+# ESPERAR BOTÓN
+# ============================================================
+
 def esperar_boton(
     compartimento,
     timeout=120
@@ -765,7 +769,6 @@ def esperar_boton(
     )
 
     if pin is None:
-
         return False
 
     print(
@@ -791,19 +794,31 @@ def esperar_boton(
     inicio = time.time()
 
     # --------------------------------------------------------
-    # Esperar a que esté suelto primero
+    # Primero esperamos que el botón esté LIBRE.
+    #
+    # Esto evita tomar como válida una pulsación anterior.
+    #
+    # PUD_UP:
+    #     HIGH = libre
+    #     LOW  = presionado
     # --------------------------------------------------------
 
     while GPIO.input(pin) == GPIO.LOW:
 
         if time.time() - inicio > timeout:
 
+            print(
+                "Tiempo agotado esperando "
+                "que el botón quede libre."
+            )
+
             return False
 
         time.sleep(0.05)
 
+
     # --------------------------------------------------------
-    # Esperar pulsación
+    # Ahora esperamos que el alumno PRESIONE el botón.
     # --------------------------------------------------------
 
     while time.time() - inicio < timeout:
@@ -811,8 +826,7 @@ def esperar_boton(
         if GPIO.input(pin) == GPIO.LOW:
 
             # Antirrebote
-
-            time.sleep(0.05)
+            time.sleep(0.08)
 
             if GPIO.input(pin) == GPIO.LOW:
 
@@ -820,22 +834,27 @@ def esperar_boton(
                     "Botón presionado."
                 )
 
-                # Esperar liberación
-
-                while GPIO.input(pin) == GPIO.LOW:
-
-                    time.sleep(0.03)
+                # IMPORTANTE:
+                #
+                # NO esperamos a que el botón se libere.
+                #
+                # El estado PRESIONADO queda como confirmación
+                # de que el celular fue colocado.
+                #
+                # Más adelante, durante la devolución,
+                # esperar_liberacion() detectará cuando el alumno
+                # saque el celular y el botón pase a HIGH.
 
                 return True
 
         time.sleep(0.05)
+
 
     print(
         "Tiempo agotado esperando botón."
     )
 
     return False
-
 
 # ============================================================
 # ESPERAR LIBERACION DEL BOTON
@@ -1079,7 +1098,12 @@ class FingerprintManager:
 
             return False
 
-    # --------------------------------------------------------
+
+    # ============================================================
+    # VERIFICAR UN USUARIO
+    # ============================================================
+
+        # --------------------------------------------------------
     # VERIFICAR UN USUARIO
     # --------------------------------------------------------
 
@@ -1095,9 +1119,12 @@ class FingerprintManager:
 
                 return {
                     "ok": False,
-                    "resultado": "lector_no_disponible",
-                    "usuario": usuario
+                    "resultado":
+                        "lector_no_disponible",
+                    "usuario":
+                        usuario
                 }
+
 
             if mensaje is None:
 
@@ -1105,41 +1132,77 @@ class FingerprintManager:
                     "Coloque el dedo en el lector."
                 )
 
-            fingerprint_status["estado"] = (
-                "esperando"
-            )
 
-            fingerprint_status["mensaje"] = (
-                mensaje
-            )
+            fingerprint_status[
+                "estado"
+            ] = "esperando"
 
-            fingerprint_status["resultado"] = (
-                None
-            )
 
-            fingerprint_status["usuario"] = (
-                usuario
-            )
+            fingerprint_status[
+                "mensaje"
+            ] = mensaje
+
+
+            fingerprint_status[
+                "resultado"
+            ] = None
+
+
+            fingerprint_status[
+                "usuario"
+            ] = usuario
+
+
+            # ----------------------------------------------------
+            # Resultado final
+            # ----------------------------------------------------
 
             resultado_final = {
 
-                "ok": False,
+                "ok":
+                    False,
 
-                "resultado": None,
+                "resultado":
+                    None,
 
-                "usuario": usuario
+                "usuario":
+                    usuario
 
             }
+
+
+            # ----------------------------------------------------
+            # CONTADOR DE INTENTOS DE ESTA LECTURA
+            # ----------------------------------------------------
+
+            MAX_INTENTOS = 3
+
+            intentos = {
+
+                "cantidad":
+                    0
+
+            }
+
+
+            # ----------------------------------------------------
+            # LOOP GLIB
+            # ----------------------------------------------------
 
             loop = GLib.MainLoop()
 
+
             terminado = {
-                "valor": False
+
+                "valor":
+                    False
+
             }
 
-            # ------------------------------------------------
-            # SEÑALES
-            # ------------------------------------------------
+
+            # ====================================================
+            # SEÑALES DEL LECTOR
+            # ====================================================
 
             def signal_handler(
                 proxy,
@@ -1148,17 +1211,27 @@ class FingerprintManager:
                 parameters
             ):
 
+                # ------------------------------------------------
+                # Obtener valores de la señal
+                # ------------------------------------------------
+
                 try:
 
                     valores = parameters.unpack()
 
-                except Exception:
+                except Exception as error:
+
+                    print(
+                        "Error leyendo señal:",
+                        error
+                    )
 
                     return
 
-                # --------------------------------------------
-                # VerifyStatus
-                # --------------------------------------------
+
+                # =================================================
+                # ESTADO DE VERIFICACIÓN
+                # =================================================
 
                 if signal_name == "VerifyStatus":
 
@@ -1166,9 +1239,12 @@ class FingerprintManager:
 
                         return
 
+
                     estado = valores[0]
 
+
                     done = valores[1]
+
 
                     print(
                         "VerifyStatus:",
@@ -1176,35 +1252,54 @@ class FingerprintManager:
                         done
                     )
 
+
                     fingerprint_status[
                         "mensaje"
                     ] = estado
 
-                    # ----------------------------------------
-                    # MATCH
-                    # ----------------------------------------
+
+                    # =================================================
+                    # HUELLA CORRECTA
+                    # =================================================
 
                     if estado == "verify-match":
+
+                        print(
+                            "✓ Huella reconocida."
+                        )
+
 
                         resultado_final[
                             "ok"
                         ] = True
 
+
                         resultado_final[
                             "resultado"
                         ] = "verify-match"
+
 
                         fingerprint_status[
                             "estado"
                         ] = "reconocida"
 
+
                         fingerprint_status[
                             "resultado"
                         ] = "verify-match"
 
+
+                        fingerprint_status[
+                            "mensaje"
+                        ] = (
+                            "Huella reconocida."
+                        )
+
+
                         terminado[
                             "valor"
                         ] = True
+
 
                         try:
 
@@ -1214,64 +1309,284 @@ class FingerprintManager:
 
                             pass
 
-                    # ----------------------------------------
-                    # NO MATCH
-                    # ----------------------------------------
 
-                    elif estado in (
+                        return
 
-                        "verify-no-match",
+
+                    # =================================================
+                    # HUELLA INCORRECTA
+                    # =================================================
+                    #
+                    # MUY IMPORTANTE:
+                    #
+                    # NO hacemos VerifyStart() nuevamente acá.
+                    #
+                    # Terminamos esta lectura inmediatamente.
+                    # JavaScript recibirá el error y mostrará
+                    # REINTENTAR HUELLA.
+                    #
+                    # =================================================
+
+                    if estado == "verify-no-match":
+
+                        intentos[
+                            "cantidad"
+                        ] += 1
+
+
+                        print(
+                            "Huella no reconocida."
+                        )
+
+
+                        print(
+                            f"Intento "
+                            f"{intentos['cantidad']}/"
+                            f"{MAX_INTENTOS}"
+                        )
+
+
+                        resultado_final[
+                            "ok"
+                        ] = False
+
+
+                        resultado_final[
+                            "resultado"
+                        ] = "no-match"
+
+
+                        fingerprint_status[
+                            "estado"
+                        ] = "finalizado"
+
+
+                        if intentos[
+                            "cantidad"
+                        ] < MAX_INTENTOS:
+
+                            fingerprint_status[
+                                "mensaje"
+                            ] = (
+
+                                "Huella incorrecta. "
+
+                                f"Intento "
+                                f"{intentos['cantidad']} de "
+                                f"{MAX_INTENTOS}. "
+
+                                "Presione REINTENTAR HUELLA."
+
+                            )
+
+                        else:
+
+                            fingerprint_status[
+                                "mensaje"
+                            ] = (
+
+                                "Huella incorrecta. "
+
+                                "Presione REINTENTAR HUELLA "
+                                "para volver a intentar."
+
+                            )
+
+
+                        terminado[
+                            "valor"
+                        ] = True
+
+
+                        try:
+
+                            loop.quit()
+
+                        except Exception:
+
+                            pass
+
+
+                        return
+
+
+                    # =================================================
+                    # ESCANEO INCORRECTO / DEDO MAL COLOCADO
+                    # =================================================
+
+                    if estado in (
 
                         "verify-retry-scan",
 
                         "verify-finger-not-centered",
 
-                        "verify-remove-and-retry",
-
-                        "verify-disconnected",
-
-                        "verify-unknown-error"
+                        "verify-remove-and-retry"
 
                     ):
 
-                        if done:
+                        fingerprint_status[
+                            "estado"
+                        ] = "reintento"
 
-                            resultado_final[
-                                "ok"
-                            ] = False
 
-                            resultado_final[
-                                "resultado"
-                            ] = estado
+                        if estado == (
+                            "verify-finger-not-centered"
+                        ):
 
                             fingerprint_status[
-                                "estado"
-                            ] = "finalizado"
+                                "mensaje"
+                            ] = (
 
-                            terminado[
-                                "valor"
-                            ] = True
+                                "Coloque el dedo "
+                                "correctamente en el centro "
+                                "del lector."
 
-                            try:
+                            )
 
-                                loop.quit()
 
-                            except Exception:
+                        elif estado == (
+                            "verify-remove-and-retry"
+                        ):
 
-                                pass
+                            fingerprint_status[
+                                "mensaje"
+                            ] = (
 
-                # --------------------------------------------
-                # VerifyFingerSelected
-                # --------------------------------------------
+                                "Retire el dedo y vuelva "
+                                "a colocarlo."
+
+                            )
+
+
+                        else:
+
+                            fingerprint_status[
+                                "mensaje"
+                            ] = (
+
+                                "No se pudo leer "
+                                "correctamente. "
+                                "Vuelva a colocar el dedo."
+
+                            )
+
+
+                        # --------------------------------------------
+                        # En estos casos fprintd todavía puede
+                        # continuar con la misma lectura.
+                        # --------------------------------------------
+
+                        return
+
+
+                    # =================================================
+                    # LECTOR DESCONECTADO
+                    # =================================================
+
+                    if estado == "verify-disconnected":
+
+                        resultado_final[
+                            "ok"
+                        ] = False
+
+
+                        resultado_final[
+                            "resultado"
+                        ] = (
+                            "verify-disconnected"
+                        )
+
+
+                        fingerprint_status[
+                            "estado"
+                        ] = "error"
+
+
+                        fingerprint_status[
+                            "mensaje"
+                        ] = (
+                            "El lector se desconectó."
+                        )
+
+
+                        terminado[
+                            "valor"
+                        ] = True
+
+
+                        try:
+
+                            loop.quit()
+
+                        except Exception:
+
+                            pass
+
+
+                        return
+
+
+                    # =================================================
+                    # ERROR DESCONOCIDO
+                    # =================================================
+
+                    if estado == "verify-unknown-error":
+
+                        resultado_final[
+                            "ok"
+                        ] = False
+
+
+                        resultado_final[
+                            "resultado"
+                        ] = (
+                            "verify-unknown-error"
+                        )
+
+
+                        fingerprint_status[
+                            "estado"
+                        ] = "error"
+
+
+                        fingerprint_status[
+                            "mensaje"
+                        ] = (
+                            "Ocurrió un error "
+                            "en el lector."
+                        )
+
+
+                        terminado[
+                            "valor"
+                        ] = True
+
+
+                        try:
+
+                            loop.quit()
+
+                        except Exception:
+
+                            pass
+
+
+                        return
+
+
+                # =================================================
+                # DEDO SELECCIONADO
+                # =================================================
 
                 elif (
-                    signal_name
-                    == "VerifyFingerSelected"
+                    signal_name ==
+                    "VerifyFingerSelected"
                 ):
 
                     try:
 
                         dedo = valores[0]
+
 
                         print(
                             "Dedo seleccionado:",
@@ -1282,27 +1597,31 @@ class FingerprintManager:
 
                         pass
 
-            # ------------------------------------------------
+
+            # ========================================================
             # CONECTAR SEÑAL
-            # ------------------------------------------------
+            # ========================================================
 
             signal_id = None
+
 
             try:
 
                 signal_id = self.device.connect(
-                    "g-signal",
-                    signal_handler
-                )
+                        "g-signal",
+                        signal_handler
+                    )
 
-                # --------------------------------------------
-                # CLAIM DEL USUARIO
-                # --------------------------------------------
+
+                # ----------------------------------------------------
+                # RECLAMAR LECTOR
+                # ----------------------------------------------------
 
                 print(
                     "Reclamando lector para:",
                     usuario
                 )
+
 
                 self.device.call_sync(
 
@@ -1321,13 +1640,15 @@ class FingerprintManager:
 
                 )
 
+
                 print(
                     "Lector reclamado."
                 )
 
-                # --------------------------------------------
-                # VERIFICAR
-                # --------------------------------------------
+
+                # ----------------------------------------------------
+                # INICIAR VERIFICACIÓN
+                # ----------------------------------------------------
 
                 self.device.call_sync(
 
@@ -1346,40 +1667,61 @@ class FingerprintManager:
 
                 )
 
+
                 print(
                     "Esperando huella..."
                 )
 
-                # --------------------------------------------
+
+                # ----------------------------------------------------
                 # TIMEOUT
-                # --------------------------------------------
+                #
+                # Este timeout solamente actúa si nadie coloca
+                # el dedo.
+                #
+                # Una huella incorrecta NO espera este timeout:
+                # VerifyStatus -> verify-no-match -> loop.quit()
+                # ----------------------------------------------------
 
                 def timeout():
 
-                    if not terminado["valor"]:
+                    if not terminado[
+                        "valor"
+                    ]:
 
                         print(
                             "Tiempo agotado "
                             "esperando huella."
                         )
 
+
+                        resultado_final[
+                            "ok"
+                        ] = False
+
+
                         resultado_final[
                             "resultado"
                         ] = "timeout"
+
 
                         fingerprint_status[
                             "estado"
                         ] = "timeout"
 
+
                         fingerprint_status[
                             "mensaje"
                         ] = (
-                            "Tiempo agotado."
+                            "Tiempo agotado. "
+                            "Presione REINTENTAR HUELLA."
                         )
+
 
                         terminado[
                             "valor"
                         ] = True
+
 
                         try:
 
@@ -1389,14 +1731,25 @@ class FingerprintManager:
 
                             pass
 
+
                     return False
 
+
                 GLib.timeout_add(
+
                     30000,
+
                     timeout
+
                 )
 
+
+                # ----------------------------------------------------
+                # ESPERAR EVENTOS
+                # ----------------------------------------------------
+
                 loop.run()
+
 
             except Exception as error:
 
@@ -1406,27 +1759,32 @@ class FingerprintManager:
                     error
                 )
 
+
                 resultado_final[
                     "ok"
                 ] = False
+
 
                 resultado_final[
                     "resultado"
                 ] = str(error)
 
+
                 fingerprint_status[
                     "estado"
                 ] = "error"
+
 
                 fingerprint_status[
                     "mensaje"
                 ] = str(error)
 
+
             finally:
 
-                # --------------------------------------------
-                # DETENER VERIFY
-                # --------------------------------------------
+                # ----------------------------------------------------
+                # DETENER VERIFICACIÓN
+                # ----------------------------------------------------
 
                 try:
 
@@ -1444,13 +1802,17 @@ class FingerprintManager:
 
                     )
 
-                except Exception:
+                except Exception as error:
 
-                    pass
+                    print(
+                        "Aviso VerifyStop:",
+                        error
+                    )
 
-                # --------------------------------------------
-                # LIBERAR
-                # --------------------------------------------
+
+                # ----------------------------------------------------
+                # LIBERAR LECTOR
+                # ----------------------------------------------------
 
                 try:
 
@@ -1468,13 +1830,17 @@ class FingerprintManager:
 
                     )
 
-                except Exception:
+                except Exception as error:
 
-                    pass
+                    print(
+                        "Aviso Release:",
+                        error
+                    )
 
-                # --------------------------------------------
+
+                # ----------------------------------------------------
                 # DESCONECTAR SEÑAL
-                # --------------------------------------------
+                # ----------------------------------------------------
 
                 if signal_id is not None:
 
@@ -1487,6 +1853,11 @@ class FingerprintManager:
                     except Exception:
 
                         pass
+
+
+            # --------------------------------------------------------
+            # DEVOLVER SIEMPRE UN DICCIONARIO
+            # --------------------------------------------------------
 
             return resultado_final
 
