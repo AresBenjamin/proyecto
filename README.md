@@ -4,7 +4,7 @@ Sistema de Locker Escolar con Control de Asistencia
 
 Sistema automatizado para gestionar el almacenamiento de celulares de los alumnos y llevar el control de asistencia, llegadas tarde y retiros mediante una Raspberry Pi 3.
 
-##🛠️ Tecnologías utilizadas
+## 🛠️ Tecnologías utilizadas
 Python 3
 Flask
 SQLite
@@ -43,7 +43,7 @@ sudo apt install git -y
 
 Luego clonar el repositorio:
 
-git clone github.com/AresBenjamin/proyecto)
+git clone github.com/AresBenjamin/proyecto
 
 Entrar en la carpeta del proyecto:
 cd locker
