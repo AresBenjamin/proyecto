@@ -80,15 +80,6 @@
             Esperando identificación...
         </p>
 
-<button
-    id="botonReintentarLogin"
-    type="button"
-    style="display:inline-block"
-    onclick="reintentarLogin()"
->
-    REINTENTAR HUELLA
-</button>
-
     </main>
 
 </section>
@@ -177,6 +168,14 @@
     class="pantalla"
     style="display:none"
 >
+
+    <button
+        class="boton-salir-asistencia"
+        onclick="volverAlMenuDesdeAsistencia()"
+        type="button"
+    >
+        VOLVER AL MENÚ
+    </button>
 
     <main class="contenedor">
 
@@ -341,7 +340,7 @@
             <button
             id="botonReintentarAsistencia"
             type="button"
-            style="display:inline-block"
+            style="display:none"
             onclick="reintentarHuellaAsistencia()"
             >
                 REINTENTAR HUELLA
@@ -372,7 +371,7 @@
             <button
             id="botonReintentarDevolucion"
             type="button"
-            style="display:inline-block"
+            style="display:none"
             onclick="reintentarHuellaDevolucion()"
             >
                 REINTENTAR HUELLA
@@ -480,7 +479,7 @@
             <button
                 id="botonReintentarLlegada"
                 type="button"
-                style="display:inline-block"
+                style="display:none"
                 onclick="reintentarHuellaLlegada()"
             >
                 REINTENTAR HUELLA

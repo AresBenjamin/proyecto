@@ -88,6 +88,23 @@ h3 {
    BOTONES
    ============================================================ */
 
+.boton-salir-asistencia {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+
+    padding: 12px 18px;
+
+    border: none;
+    border-radius: 8px;
+
+    cursor: pointer;
+
+    font-size: 15px;
+    font-weight: bold;
+}
+
 button {
 
     border: none;

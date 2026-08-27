@@ -318,22 +318,57 @@ function mostrarBotonHuella(
 // ============================================================
 
 async function cargarAlumnos() {
+
     try {
-        const datos = await jsonFetch(
-            "/api/alumnos"
+
+        // ----------------------------------------------------
+        // 1. Iniciar una nueva hora
+        // ----------------------------------------------------
+
+        await postJSON(
+            "/api/iniciar-hora"
         );
 
-        alumnos = Array.isArray(datos.alumnos)
-            ? datos.alumnos
-            : [];
 
-        alumnoActual = 0;
+        // ----------------------------------------------------
+        // 2. Obtener alumnos ya reiniciados
+        // ----------------------------------------------------
+
+        const datos =
+            await jsonFetch(
+                "/api/alumnos"
+            );
+
+
+        alumnos =
+            Array.isArray(
+                datos.alumnos
+            )
+                ? datos.alumnos
+                : [];
+
+
+        alumnoActual =
+            0;
+
+
+        // ----------------------------------------------------
+        // 3. Mostrar primer alumno
+        // ----------------------------------------------------
 
         mostrarAlumno();
 
+
     } catch (error) {
-        console.error("Error cargando alumnos:", error);
-        mostrarMensaje(error.message);
+
+        console.error(
+            "Error iniciando nueva toma de lista:",
+            error
+        );
+
+        mostrarMensaje(
+            error.message
+        );
     }
 }
 
@@ -1044,6 +1079,33 @@ async function noTrajoCelular() {
     }
 }
 
+// ============================================================
+// VOLVER AL MENÚ DESDE TOMA DE LISTA
+// ============================================================
+
+function volverAlMenuDesdeAsistencia() {
+
+    // Limpiar el estado de la toma de lista.
+    alumnoActual = 0;
+    operacionEnCurso = false;
+    asistenciaConCelularPendiente = false;
+
+    // Ocultar elementos de asistencia.
+    ocultar("preguntaPresente");
+    ocultar("preguntaCelular");
+    ocultar("esperandoCelular");
+    ocultar("esperandoHuella");
+    ocultar("listaTerminada");
+
+    ocultarBotonReintento(
+        "botonReintentarAsistencia"
+    );
+
+    // Volver al menú.
+    mostrarPantalla(
+        "pantallaMenu"
+    );
+}
 
 // ============================================================
 // BOTÓN REINTENTAR ASISTENCIA
@@ -1228,15 +1290,24 @@ function siguienteAlumno() {
 // FINALIZAR LISTA
 // ============================================================
 
-function finalizarLista() {
+async function finalizarLista() {
 
-    ocultar("preguntaPresente");
-    ocultar("preguntaCelular");
-    ocultar("esperandoCelular");
-    ocultar("esperandoHuella");
+    ocultar(
+        "preguntaPresente"
+    );
 
-    // Ocultar el botón de reintento de huella
-    // porque la toma de lista ya terminó.
+    ocultar(
+        "preguntaCelular"
+    );
+
+    ocultar(
+        "esperandoCelular"
+    );
+
+    ocultar(
+        "esperandoHuella"
+    );
+
     ocultarBotonReintento(
         "botonReintentarAsistencia"
     );
@@ -1247,14 +1318,15 @@ function finalizarLista() {
     operacionEnCurso =
         false;
 
-    mostrar("listaTerminada");
+    mostrar(
+        "listaTerminada"
+    );
 
     cambiarTexto(
         "mensajeFinal",
         "La toma de lista termino correctamente."
     );
 }
-
 
 // ============================================================
 // LED
@@ -1474,7 +1546,21 @@ function seleccionarAlumnoLlegada(
     );
 
 
-    mostrarBotonHuella(
+    // --------------------------------------------------------
+    // Mostrar ahora la pantalla de huella.
+    // --------------------------------------------------------
+
+    mostrar(
+        "esperandoHuellaLlegada"
+    );
+
+
+    // --------------------------------------------------------
+    // El botón de reintento NO aparece todavía.
+    // Solamente aparecerá si la primera huella falla.
+    // --------------------------------------------------------
+
+    ocultarBotonReintento(
         "botonReintentarLlegada"
     );
 
@@ -1484,6 +1570,10 @@ function seleccionarAlumnoLlegada(
         "Coloque la huella del alumno."
     );
 
+
+    // --------------------------------------------------------
+    // Iniciar primera lectura.
+    // --------------------------------------------------------
 
     verificarHuellaLlegada();
 
@@ -2320,8 +2410,8 @@ async function finalizarHora() {
 
         const boton =
             document.querySelector(
-                "#listaTerminada button"
-            );
+                "#listaTerminada button:not(#botonReintentarDevolucion)"
+    );
 
         if (boton) {
             boton.style.display =
@@ -2762,8 +2852,8 @@ async function terminarHoraDefinitivamente() {
 
         const boton =
             document.querySelector(
-                "#listaTerminada button"
-            );
+                "#listaTerminada button:not(#botonReintentarDevolucion)"
+    );
 
         if (boton) {
 
@@ -3161,106 +3251,3 @@ window.addEventListener(
 
     }
 );
-
-
-async function actualizarListaAusentes() {
-    const contenedor =
-        document.getElementById(
-            "listaAusentes"
-        );
-
-    if (!contenedor) {
-        return;
-    }
-
-    try {
-        const datos =
-            await jsonFetch(
-                "/api/alumnos"
-            );
-
-        const lista =
-            (datos.alumnos || [])
-                .filter(
-                    function (alumno) {
-                        return (
-                            Number(alumno.presente) === 0 &&
-                            Number(alumno.se_retiro) !== 1
-                        );
-                    }
-                );
-
-        contenedor.innerHTML = "";
-
-        const titulo =
-            document.createElement(
-                "h2"
-            );
-
-        titulo.textContent =
-            "Seleccione el alumno que llego tarde:";
-
-        contenedor.appendChild(
-            titulo
-        );
-
-        if (lista.length === 0) {
-            const mensaje =
-                document.createElement(
-                    "p"
-                );
-
-            mensaje.textContent =
-                "No hay alumnos ausentes.";
-
-            contenedor.appendChild(
-                mensaje
-            );
-
-            return;
-        }
-
-        lista.forEach(
-            function (alumno) {
-
-                const boton =
-                    document.createElement(
-                        "button"
-                    );
-
-                boton.className =
-                    "alumno-boton";
-
-                boton.type =
-                    "button";
-
-                boton.textContent =
-                    `${alumno.numero_lista} - ${nombreCompleto(alumno)}`;
-
-                boton.addEventListener(
-                    "click",
-                    function () {
-                        seleccionarAlumnoLlegada(
-                            alumno
-                        );
-                    }
-                );
-
-                contenedor.appendChild(
-                    boton
-                );
-            }
-        );
-
-    } catch (error) {
-
-        console.error(
-            "Error actualizando lista de ausentes:",
-            error
-        );
-
-        mostrarMensaje(
-            error.message
-        );
-    }
-}

@@ -1175,7 +1175,7 @@ class FingerprintManager:
             # CONTADOR DE INTENTOS DE ESTA LECTURA
             # ----------------------------------------------------
 
-            MAX_INTENTOS = 3
+            MAX_INTENTOS = 100000
 
             intentos = {
 
@@ -2604,6 +2604,74 @@ def api_led(
 
     })
 
+
+# ============================================================
+# API - INICIAR NUEVA HORA / NUEVA TOMA DE LISTA
+# ============================================================
+
+@app.route(
+    "/api/iniciar-hora",
+    methods=["POST"]
+)
+def api_iniciar_hora():
+
+    conexion = conectar_db()
+
+    try:
+
+        # Reiniciar solamente los datos que pertenecen
+        # a la hora actual/anterior.
+        #
+        # NO se modifican:
+        # - nombre
+        # - apellido
+        # - huella
+        # - compartimento
+
+        conexion.execute(
+            """
+            UPDATE alumnos
+            SET
+                presente = 0,
+                llego_tarde = 0,
+                se_retiro = 0,
+                hora_llegada = NULL,
+                hora_retiro = NULL,
+                trajo_celular = 0
+            """
+        )
+
+        conexion.commit()
+
+        print(
+            "Nueva hora iniciada. "
+            "Estados de alumnos reiniciados."
+        )
+
+        return jsonify({
+            "ok": True,
+            "mensaje":
+                "Nueva hora iniciada correctamente."
+        })
+
+    except Exception as error:
+
+        conexion.rollback()
+
+        print(
+            "Error iniciando nueva hora:",
+            error
+        )
+
+        return jsonify({
+            "ok": False,
+            "mensaje":
+                str(error)
+        }), 500
+
+    finally:
+
+        conexion.close()
 
 # ============================================================
 # API ASISTENCIA - PRESENTE
