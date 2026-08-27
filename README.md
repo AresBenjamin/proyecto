@@ -1,10 +1,10 @@
 # Sistema
-🔐 Proyecto
+# 🔐 Proyecto
 Sistema de Locker Escolar con Control de Asistencia
 
 Sistema automatizado para gestionar el almacenamiento de celulares de los alumnos y llevar el control de asistencia, llegadas tarde y retiros mediante una Raspberry Pi 3.
 
-🛠️ Tecnologías utilizadas
+##🛠️ Tecnologías utilizadas
 Python 3
 Flask
 SQLite
@@ -14,7 +14,7 @@ JavaScript
 RPi.GPIO
 DigitalPersona 4500
 Raspberry Pi 3
-🚀 Instalación
+### 🚀 Instalación
 1. Instalación de Python
 
 El proyecto está pensado para ejecutarse principalmente en una Raspberry Pi 3 con Linux.
@@ -28,7 +28,7 @@ sudo apt upgrade -y
 Instalar Python y pip
 sudo apt install python3 python3-pip -y
 
-Verificar que Python se haya instalado correctamente:
+#### Verificar que Python se haya instalado correctamente:
 
 python3 --version
 
@@ -43,18 +43,16 @@ sudo apt install git -y
 
 Luego clonar el repositorio:
 
-git clone https://github.com/usuario/link.git
-
-Reemplazar https://github.com/usuario/link.git por el enlace real del repositorio.
+git clone github.com/AresBenjamin/proyecto)
 
 Entrar en la carpeta del proyecto:
-
 cd locker
-3. Instalar las librerías necesarias
+
+### 3. Instalar las librerías necesarias
 
 Antes de ejecutar el programa se deben instalar las librerías utilizadas por el proyecto.
 
-Flask
+## Flask
 
 Flask se utiliza para crear el servidor web y las API que permiten la comunicación entre JavaScript y Python.
 
@@ -78,7 +76,7 @@ time
 
 Por lo tanto, no es necesario instalarlas mediante pip.
 
-📦 Resumen de librerías
+### 📦 Resumen de librerías
 
 | Librería  | Instalación |
 |-----------|-------------|
@@ -92,7 +90,7 @@ Por lo tanto, no es necesario instalarlas mediante pip.
 
 
 
-Hardware
+### Hardware
 
 | Componente | Cantidad |
 |------------|----------|
@@ -107,7 +105,7 @@ Hardware
 | Fuente de alimentación adecuada para los componentes que la requieran | — |
 
 
-📌 Conexiones GPIO
+### 📌 Conexiones GPIO
 
 | Componente            | GPIO |
 |-----------------------|------|
@@ -123,7 +121,7 @@ Hardware
 
 Los GPIO de la Raspberry Pi trabajan a 3,3 V. El relé y los LEDs deben conectarse utilizando los componentes de protección y resistencias correspondientes.
 
-Resumen
+# Resumen
 
 El sistema centraliza la asistencia y gestión de celulares mediante una Raspberry Pi 3. El profesor o preceptor se identifica con huella, los alumnos también utilizan su huella para identificarse y el locker administra automáticamente los cuatro compartimentos disponibles.
 
